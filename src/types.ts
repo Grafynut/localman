@@ -43,3 +43,16 @@ export type HttpErrorResult = {
 };
 
 export type ResponseState = HttpResponseResult | HttpErrorResult | null;
+
+export type SyncAction = "Create" | "Update" | "Delete";
+export type SyncEntityType = "Collection" | "Request";
+
+export type SyncEvent = {
+  event_id: string;
+  action: SyncAction;
+  entity_type: SyncEntityType;
+  entity_id: string;
+  payload: string;
+  timestamp: string;
+  origin_device: string;
+};

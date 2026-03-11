@@ -3,14 +3,23 @@ import { Activity, ChevronDown, Search, Settings, User, Users } from "lucide-rea
 
 type Props = {
   peersCount: number;
+  workspaceOptions: string[];
 };
 
-const WORKSPACES = ["My Workspace", "Backend APIs", "Shared Space"];
-
-export function TopBar({ peersCount }: Props) {
-  const [workspace, setWorkspace] = useState(WORKSPACES[0]);
+export function TopBar({ peersCount, workspaceOptions }: Props) {
+  const [workspace, setWorkspace] = useState(workspaceOptions[0] || "Workspace");
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (workspaceOptions.length === 0) {
+      setWorkspace("Workspace");
+      return;
+    }
+    if (!workspaceOptions.includes(workspace)) {
+      setWorkspace(workspaceOptions[0]);
+    }
+  }, [workspaceOptions, workspace]);
 
   useEffect(() => {
     const onClick = (event: MouseEvent) => {
@@ -36,15 +45,19 @@ export function TopBar({ peersCount }: Props) {
 
         <div className="relative" ref={menuRef}>
           <button
-            onClick={() => setWorkspaceOpen((prev) => !prev)}
+            onClick={() => {
+              if (workspaceOptions.length > 1) {
+                setWorkspaceOpen((prev) => !prev);
+              }
+            }}
             className="flex items-center space-x-1 hover:bg-white/5 px-2 py-1 rounded ml-4 text-sm"
           >
             <span className="text-gray-300">{workspace}</span>
             <ChevronDown size={14} className={`text-muted transition-transform ${workspaceOpen ? "rotate-180" : ""}`} />
           </button>
-          {workspaceOpen && (
+          {workspaceOpen && workspaceOptions.length > 1 && (
             <div className="absolute left-0 top-9 min-w-[170px] rounded-md border border-border bg-surface shadow-lg z-30">
-              {WORKSPACES.map((item) => (
+              {workspaceOptions.map((item) => (
                 <button
                   key={item}
                   onClick={() => {

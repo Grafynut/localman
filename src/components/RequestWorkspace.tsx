@@ -1,4 +1,11 @@
-import { ChevronDown, Folder, MoreHorizontal, Play, Plus, Save } from "lucide-react";
+import {
+  ChevronDown,
+  Folder,
+  MoreHorizontal,
+  Play,
+  Plus,
+  Save,
+} from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { KeyValueEditor } from "./KeyValueEditor";
 import type { KeyValuePair, WorkspaceTab } from "../types";
@@ -8,7 +15,9 @@ type Props = {
   activeCollectionName: string;
   activeRequestName: string;
   isCreatingRequest: boolean;
+  isSavingRequest: boolean;
   onCreateRequest: () => void;
+  onSaveRequest: () => void;
   reqMethod: string;
   setReqMethod: Dispatch<SetStateAction<string>>;
   reqUrl: string;
@@ -29,7 +38,9 @@ export function RequestWorkspace({
   activeCollectionName,
   activeRequestName,
   isCreatingRequest,
+  isSavingRequest,
   onCreateRequest,
+  onSaveRequest,
   reqMethod,
   setReqMethod,
   reqUrl,
@@ -56,7 +67,9 @@ export function RequestWorkspace({
             <div className="flex items-center space-x-2 text-gray-200 font-bold">
               <Folder size={16} className="text-primary" />
               <span>{activeCollectionName || "Select a collection"}</span>
-              {activeRequestName && <span className="text-muted">/ {activeRequestName}</span>}
+              {activeRequestName && (
+                <span className="text-muted">/ {activeRequestName}</span>
+              )}
             </div>
           </div>
         </div>
@@ -71,9 +84,13 @@ export function RequestWorkspace({
             <Plus size={14} />
             <span>{isCreatingRequest ? "Creating..." : "Create New"}</span>
           </button>
-          <button className="h-8 px-5 rounded bg-transparent border border-primary/40 text-primary hover:bg-primary/10 font-medium text-[13px] flex items-center space-x-2 transition-colors shadow-sm cursor-pointer">
+          <button
+            onClick={onSaveRequest}
+            disabled={isSavingRequest}
+            className="h-8 px-5 rounded bg-transparent border border-primary/40 text-primary hover:bg-primary/10 font-medium text-[13px] flex items-center space-x-2 transition-colors shadow-sm cursor-pointer disabled:opacity-60"
+          >
             <Save size={14} strokeWidth={2.5} />
-            <span>Save</span>
+            <span>{isSavingRequest ? "Saving..." : "Save"}</span>
           </button>
         </div>
       </div>
@@ -92,7 +109,10 @@ export function RequestWorkspace({
               <option className="bg-surface text-red-400">DELETE</option>
               <option className="bg-surface text-purple-400">PATCH</option>
             </select>
-            <ChevronDown size={14} className="absolute right-2 text-muted pointer-events-none" />
+            <ChevronDown
+              size={14}
+              className="absolute right-2 text-muted pointer-events-none"
+            />
           </div>
 
           <input
@@ -128,14 +148,18 @@ export function RequestWorkspace({
       <div className="flex-1 flex flex-col min-h-0 bg-[#1e1e1e]">
         <div className="flex-1 flex flex-col min-h-0 relative border-b border-border border-b-[2px]">
           <div className="flex border-b border-border px-2 shrink-0 bg-[#1e1e1e]">
-            {(["Params", "Headers", "Body", "Auth", "Tests", "Docs"] as const).map((tab) => (
+            {(
+              ["Params", "Headers", "Body", "Auth", "Tests", "Docs"] as const
+            ).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveWorkspaceTab(tab)}
                 className={`px-4 py-2.5 text-[13px] font-medium transition-all duration-200 relative
-                  ${activeWorkspaceTab === tab
-                    ? "text-gray-100"
-                    : "text-muted hover:text-gray-300"}`}
+                  ${
+                    activeWorkspaceTab === tab
+                      ? " bg-gray-700 text-white"
+                      : "text-muted hover:text-gray-300"
+                  }`}
               >
                 {tab}
                 {activeWorkspaceTab === tab && (
@@ -146,17 +170,30 @@ export function RequestWorkspace({
           </div>
 
           <div className="flex-1 overflow-hidden relative bg-[#1e1e1e]">
-            {activeWorkspaceTab === "Headers" && <KeyValueEditor items={reqHeaders} setItems={setReqHeaders} />}
-            {activeWorkspaceTab === "Params" && <KeyValueEditor items={reqParams} setItems={setReqParams} />}
+            {activeWorkspaceTab === "Headers" && (
+              <KeyValueEditor items={reqHeaders} setItems={setReqHeaders} />
+            )}
+            {activeWorkspaceTab === "Params" && (
+              <KeyValueEditor items={reqParams} setItems={setReqParams} />
+            )}
 
             {activeWorkspaceTab === "Body" && (
               <div className="flex-1 flex flex-col h-full bg-[#1e1e1e]">
                 <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-surface/30 shrink-0">
-                  <span className="text-[12px] font-semibold text-gray-300">Request Body</span>
+                  <span className="text-[12px] font-semibold text-gray-300">
+                    Request Body
+                  </span>
                 </div>
                 <div className="flex-1 relative bg-[#1e1e1e]">
                   <div className="absolute left-0 top-0 bottom-0 w-12 bg-surface/10 border-r border-border text-right py-4 px-3 text-[13px] text-muted font-mono select-none">
-                    {reqBody.split("\n").map((_, i) => <div key={i} className="mb-[2px] opacity-70 leading-[21px]">{i + 1}</div>)}
+                    {reqBody.split("\n").map((_, i) => (
+                      <div
+                        key={i}
+                        className="mb-[2px] opacity-70 leading-[21px]"
+                      >
+                        {i + 1}
+                      </div>
+                    ))}
                   </div>
                   <textarea
                     value={reqBody}
@@ -170,7 +207,10 @@ export function RequestWorkspace({
 
             {["Auth", "Tests", "Docs"].includes(activeWorkspaceTab) && (
               <div className="flex items-center justify-center h-full text-muted text-sm font-mono bg-background/50">
-                <span>{activeWorkspaceTab} configuration coming soon</span>
+                <span>
+                  No saved {activeWorkspaceTab.toLowerCase()} data for this
+                  request.
+                </span>
               </div>
             )}
           </div>

@@ -5,12 +5,31 @@ type Props = {
   peers: Record<string, string>;
   activeCollectionName: string;
   activeRequestsCount: number;
+  connectedPeerIps: Record<string, boolean>;
+  sharingPeerIp: string | null;
+  onTogglePeerConnection: (peerIp: string) => void;
+  onSharePeer: (peerName: string, peerIp: string) => void;
 };
 
-export function RightInspector({ peers, activeCollectionName, activeRequestsCount }: Props) {
+export function RightInspector({
+  peers,
+  activeCollectionName,
+  activeRequestsCount,
+  connectedPeerIps,
+  sharingPeerIp,
+  onTogglePeerConnection,
+  onSharePeer,
+}: Props) {
   const [infoOpen, setInfoOpen] = useState(true);
   const [collabOpen, setCollabOpen] = useState(true);
   const [teamOpen, setTeamOpen] = useState(true);
+  const peerMembers = Object.entries(peers).map(([name, ip]) => ({
+    id: name,
+    name: name.split(".")[0],
+    role: "Collaborator",
+    initials: name.slice(0, 2).toUpperCase(),
+    detail: ip,
+  }));
 
   return (
     <div className="w-[300px] bg-surface flex flex-col border-l border-border shrink-0 z-10">
@@ -62,8 +81,23 @@ export function RightInspector({ peers, activeCollectionName, activeRequestsCoun
                         <MoreHorizontal size={14} className="text-muted cursor-pointer hover:text-white" />
                       </div>
                       <div className="flex space-x-2">
-                        <button className="flex-1 py-1 bg-background border border-border hover:border-gray-500 text-gray-300 text-[11px] font-medium rounded transition-colors block text-center">Connect</button>
-                        <button className="flex-1 flex items-center justify-center bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 py-1 text-[11px] font-medium rounded transition-colors">Share</button>
+                        <button
+                          onClick={() => onTogglePeerConnection(ip)}
+                          className={`flex-1 py-1 border text-[11px] font-medium rounded transition-colors block text-center ${
+                            connectedPeerIps[ip]
+                              ? "bg-primary/10 border-primary/30 text-primary"
+                              : "bg-background border-border hover:border-gray-500 text-gray-300"
+                          }`}
+                        >
+                          {connectedPeerIps[ip] ? "Connected" : "Connect"}
+                        </button>
+                        <button
+                          onClick={() => onSharePeer(name, ip)}
+                          disabled={sharingPeerIp === ip}
+                          className="flex-1 flex items-center justify-center bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 py-1 text-[11px] font-medium rounded transition-colors disabled:opacity-60"
+                        >
+                          {sharingPeerIp === ip ? "Sharing..." : "Share"}
+                        </button>
                       </div>
                     </div>
                   ))
@@ -82,18 +116,28 @@ export function RightInspector({ peers, activeCollectionName, activeRequestsCoun
             <div className="space-y-4">
               <div className="flex items-center justify-between text-[13px]">
                 <div className="flex items-center space-x-3">
-                  <div className="w-6 h-6 rounded-full bg-blue-500/20 border border-blue-500 text-blue-500 flex items-center justify-center font-bold text-[10px]">SC</div>
-                  <span className="text-gray-300">Editor</span>
+                  <div className="w-6 h-6 rounded-full bg-blue-500/20 border border-blue-500 text-blue-500 flex items-center justify-center font-bold text-[10px]">YO</div>
+                  <span className="text-gray-300">You</span>
                 </div>
-                <span className="text-muted">Editor</span>
+                <span className="text-muted">Owner</span>
               </div>
-              <div className="flex items-center justify-between text-[13px]">
-                <div className="flex items-center space-x-3">
-                  <div className="w-6 h-6 rounded-full bg-purple-500/20 border border-purple-500 text-purple-500 flex items-center justify-center font-bold text-[10px]">VW</div>
-                  <span className="text-gray-300">Viewer</span>
+              {peerMembers.map((member) => (
+                <div key={member.id} className="flex items-center justify-between text-[13px]">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-6 h-6 rounded-full bg-purple-500/20 border border-purple-500 text-purple-500 flex items-center justify-center font-bold text-[10px]">{member.initials}</div>
+                    <div className="flex flex-col">
+                      <span className="text-gray-300">{member.name}</span>
+                      <span className="text-[10px] text-blue-400 font-mono">{member.detail}</span>
+                    </div>
+                  </div>
+                  <span className="text-muted">{member.role}</span>
                 </div>
-                <span className="text-muted">Viewer</span>
-              </div>
+              ))}
+              {peerMembers.length === 0 && (
+                <div className="text-[12px] text-muted italic border border-dashed border-border rounded px-3 py-2">
+                  No collaborators connected yet.
+                </div>
+              )}
             </div>
           )}
         </div>

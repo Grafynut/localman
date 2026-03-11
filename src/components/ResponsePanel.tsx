@@ -165,7 +165,7 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab }: P
 
         {reqResponse && respTab === "Tests" && (
           <div className="h-full flex items-center justify-center text-muted text-sm font-mono">
-            Tests view coming soon
+            No response tests available for this request.
           </div>
         )}
       </div>

@@ -1,11 +1,12 @@
-
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { CollectionsSidebar } from "./components/CollectionsSidebar";
 import { RequestWorkspace } from "./components/RequestWorkspace";
 import { ResponsePanel } from "./components/ResponsePanel";
 import { RightInspector } from "./components/RightInspector";
 import { TopBar } from "./components/TopBar";
+import { ToastViewport, type ToastMessage } from "./components/ToastViewport";
 import type {
   Collection,
   HttpResponseResult,
@@ -13,6 +14,9 @@ import type {
   ResponseState,
   ResponseTab,
   StoredRequest,
+  SyncAction,
+  SyncEntityType,
+  SyncEvent,
   WorkspaceTab,
 } from "./types";
 import {
@@ -26,6 +30,8 @@ import "./App.css";
 
 function App() {
   const LOCAL_USER_ID = "local_user_1";
+  const INTERNAL_CLIPBOARD_KEY = "devcollab.internalClipboard";
+  const DEVICE_ID_KEY = "devcollab.deviceId";
 
   const [collections, setCollections] = useState<Collection[]>([]);
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
@@ -35,11 +41,14 @@ function App() {
 
   const [isLoadingRequests, setIsLoadingRequests] = useState(false);
   const [isCreatingRequest, setIsCreatingRequest] = useState(false);
+  const [isSavingRequest, setIsSavingRequest] = useState(false);
 
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("Headers");
   const [respTab, setRespTab] = useState<ResponseTab>("Body");
 
   const [peers, setPeers] = useState<Record<string, string>>({});
+  const [connectedPeerIps, setConnectedPeerIps] = useState<Record<string, boolean>>({});
+  const [sharingPeerIp, setSharingPeerIp] = useState<string | null>(null);
 
   const [reqMethod, setReqMethod] = useState("GET");
   const [reqUrl, setReqUrl] = useState("/api/v1/users");
@@ -49,6 +58,25 @@ function App() {
 
   const [reqResponse, setReqResponse] = useState<ResponseState>(null);
   const [isSending, setIsSending] = useState(false);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const syncQueueRef = useRef(Promise.resolve());
+  const collectionsRef = useRef<Collection[]>([]);
+  const activeCollectionIdRef = useRef<string | null>(null);
+  const activeRequestIdRef = useRef<string | null>(null);
+
+  const localDeviceId = useMemo(() => {
+    try {
+      const existing = window.localStorage.getItem(DEVICE_ID_KEY);
+      if (existing && existing.trim()) {
+        return existing;
+      }
+      const created = `${Date.now()}-${generateId()}`;
+      window.localStorage.setItem(DEVICE_ID_KEY, created);
+      return created;
+    } catch {
+      return `${Date.now()}-${generateId()}`;
+    }
+  }, []);
 
   const activeCollection = useMemo(
     () => collections.find((collection) => collection.id === activeCollectionId) ?? null,
@@ -66,15 +94,32 @@ function App() {
     () => activeRequests.find((request) => request.id === activeRequestId) ?? null,
     [activeRequests, activeRequestId],
   );
+  const workspaceOptions = useMemo(
+    () => Array.from(new Set(collections.map((collection) => collection.name))).filter(Boolean),
+    [collections],
+  );
 
   useEffect(() => {
     void fetchCollections();
 
     const interval = setInterval(() => {
       invoke<Record<string, string>>("get_known_peers")
-        .then(setPeers)
+        .then((discoveredPeers) => {
+          setPeers(discoveredPeers);
+          const availableIps = new Set(Object.values(discoveredPeers));
+          setConnectedPeerIps((prev) => {
+            const next: Record<string, boolean> = {};
+            Object.entries(prev).forEach(([ip, isConnected]) => {
+              if (isConnected && availableIps.has(ip)) {
+                next[ip] = true;
+              }
+            });
+            return next;
+          });
+        })
         .catch(() => {
-          // Ignore transient network discovery failures.
+          setPeers({});
+          setConnectedPeerIps({});
         });
     }, 3000);
 
@@ -89,6 +134,40 @@ function App() {
     void fetchRequests(activeCollectionId);
   }, [activeCollectionId]);
 
+  useEffect(() => {
+    activeCollectionIdRef.current = activeCollectionId;
+  }, [activeCollectionId]);
+
+  useEffect(() => {
+    activeRequestIdRef.current = activeRequestId;
+  }, [activeRequestId]);
+
+  useEffect(() => {
+    collectionsRef.current = collections;
+  }, [collections]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    const setup = async () => {
+      unlisten = await listen<SyncEvent>("sync_event_received", (event) => {
+        syncQueueRef.current = syncQueueRef.current
+          .then(() => applyRemoteSyncEvent(event.payload))
+          .catch((error) => {
+            console.error("Failed to apply remote sync event:", error);
+          });
+      });
+    };
+
+    void setup();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, []);
+
   function applyStoredRequest(request: StoredRequest) {
     setReqMethod(request.method || "GET");
     setReqUrl(request.url || "");
@@ -98,6 +177,416 @@ function App() {
 
   function toggleCollectionExpanded(id: string) {
     setExpandedCollections((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  function dismissToast(id: number) {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  }
+
+  function showToast(toast: Omit<ToastMessage, "id">) {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((prev) => [...prev, { id, ...toast }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((item) => item.id !== id));
+    }, 3800);
+  }
+
+  function connectedPeerList() {
+    return Object.entries(connectedPeerIps)
+      .filter(([, isConnected]) => isConnected)
+      .map(([peerIp]) => peerIp);
+  }
+
+  function createSyncEvent(
+    action: SyncAction,
+    entityType: SyncEntityType,
+    entityId: string,
+    payload: unknown,
+  ): SyncEvent {
+    return {
+      event_id: `${Date.now()}-${generateId()}`,
+      action,
+      entity_type: entityType,
+      entity_id: entityId,
+      payload: JSON.stringify(payload ?? {}),
+      timestamp: new Date().toISOString(),
+      origin_device: localDeviceId,
+    };
+  }
+
+  function buildPeerWsUrl(peerIp: string) {
+    const raw = peerIp.trim().replace(/^\[|\]$/g, "");
+    const host = raw.includes(":") ? `[${raw.replace(/%/g, "%25")}]` : raw;
+    return `ws://${host}:8080/ws`;
+  }
+
+  async function sendSyncEventsToPeer(peerIp: string, events: SyncEvent[]) {
+    if (events.length === 0) {
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const ws = new window.WebSocket(buildPeerWsUrl(peerIp));
+      const timeout = window.setTimeout(() => {
+        ws.close();
+        reject(new Error(`Timed out connecting to ${peerIp}`));
+      }, 5000);
+      let settled = false;
+
+      ws.onopen = () => {
+        events.forEach((event) => ws.send(JSON.stringify(event)));
+        window.setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            window.clearTimeout(timeout);
+            ws.close();
+            resolve();
+          }
+        }, 120);
+      };
+
+      ws.onerror = () => {
+        if (!settled) {
+          settled = true;
+          window.clearTimeout(timeout);
+          reject(new Error(`Could not connect to ${peerIp}:8080`));
+        }
+      };
+
+      ws.onclose = () => {
+        if (!settled) {
+          settled = true;
+          window.clearTimeout(timeout);
+          resolve();
+        }
+      };
+    });
+  }
+
+  async function broadcastSyncEvent(
+    action: SyncAction,
+    entityType: SyncEntityType,
+    entityId: string,
+    payload: unknown,
+  ) {
+    const peerIps = connectedPeerList();
+    if (peerIps.length === 0) {
+      return;
+    }
+
+    const event = createSyncEvent(action, entityType, entityId, payload);
+    const results = await Promise.allSettled(
+      peerIps.map((peerIp) => sendSyncEventsToPeer(peerIp, [event])),
+    );
+    const failed = results.filter((result) => result.status === "rejected").length;
+    if (failed > 0) {
+      showToast({
+        kind: "error",
+        title: "Sync partially failed",
+        description: `${failed} peer${failed === 1 ? "" : "s"} unreachable.`,
+      });
+    }
+  }
+
+  async function applyRemoteSyncEvent(event: SyncEvent) {
+    if (event.origin_device === localDeviceId) {
+      return;
+    }
+
+    let payload: Record<string, unknown> = {};
+    if (event.payload && event.payload.trim()) {
+      try {
+        const parsed = JSON.parse(event.payload) as unknown;
+        if (parsed && typeof parsed === "object") {
+          payload = parsed as Record<string, unknown>;
+        }
+      } catch {
+        payload = {};
+      }
+    }
+
+    if (event.entity_type === "Collection") {
+      if (event.action === "Delete") {
+        try {
+          await invoke("delete_collection", { id: event.entity_id });
+        } catch {
+          // Ignore missing rows.
+        }
+        setCollections((prev) => prev.filter((item) => item.id !== event.entity_id));
+        setExpandedCollections((prev) => {
+          const next = { ...prev };
+          delete next[event.entity_id];
+          return next;
+        });
+        setRequestsByCollection((prev) => {
+          const next = { ...prev };
+          delete next[event.entity_id];
+          return next;
+        });
+        if (activeCollectionIdRef.current === event.entity_id) {
+          setActiveCollectionId(null);
+          setActiveRequestId(null);
+        }
+        return;
+      }
+
+      const name =
+        typeof payload.name === "string" && payload.name.trim()
+          ? payload.name
+          : `Shared Collection ${event.entity_id.slice(0, 4)}`;
+      const ownerId =
+        typeof payload.owner_id === "string" && payload.owner_id.trim()
+          ? payload.owner_id
+          : LOCAL_USER_ID;
+      const upserted = await invoke<Collection>("upsert_collection", {
+        id: event.entity_id,
+        name,
+        ownerId,
+        owner_id: ownerId,
+      });
+      setCollections((prev) => {
+        const idx = prev.findIndex((item) => item.id === upserted.id);
+        if (idx === -1) {
+          return [...prev, upserted];
+        }
+        const next = [...prev];
+        next[idx] = upserted;
+        return next;
+      });
+      setExpandedCollections((prev) => ({ ...prev, [upserted.id]: true }));
+      return;
+    }
+
+    if (event.entity_type === "Request") {
+      if (event.action === "Delete") {
+        const payloadCollectionId =
+          typeof payload.collection_id === "string" ? payload.collection_id : null;
+        try {
+          await invoke("delete_request", { id: event.entity_id });
+        } catch {
+          // Ignore missing rows.
+        }
+        setRequestsByCollection((prev) => {
+          if (payloadCollectionId && prev[payloadCollectionId]) {
+            return {
+              ...prev,
+              [payloadCollectionId]: prev[payloadCollectionId].filter(
+                (request) => request.id !== event.entity_id,
+              ),
+            };
+          }
+
+          const next: Record<string, StoredRequest[]> = {};
+          Object.entries(prev).forEach(([collectionId, requests]) => {
+            next[collectionId] = requests.filter((request) => request.id !== event.entity_id);
+          });
+          return next;
+        });
+        if (activeRequestIdRef.current === event.entity_id) {
+          setActiveRequestId(null);
+        }
+        return;
+      }
+
+      const collectionId =
+        typeof payload.collection_id === "string" ? payload.collection_id : null;
+      if (!collectionId) {
+        return;
+      }
+      if (!collectionsRef.current.some((collection) => collection.id === collectionId)) {
+        const placeholderCollection = await invoke<Collection>("upsert_collection", {
+          id: collectionId,
+          name: `Shared Collection ${collectionId.slice(0, 4)}`,
+          ownerId: LOCAL_USER_ID,
+          owner_id: LOCAL_USER_ID,
+        });
+        setCollections((prev) => {
+          if (prev.some((collection) => collection.id === placeholderCollection.id)) {
+            return prev;
+          }
+          return [...prev, placeholderCollection];
+        });
+      }
+      const name =
+        typeof payload.name === "string" && payload.name.trim()
+          ? payload.name
+          : "Shared Request";
+      const method =
+        typeof payload.method === "string" && payload.method.trim()
+          ? payload.method.toUpperCase()
+          : "GET";
+      const url = typeof payload.url === "string" ? payload.url : "/";
+      const headers = normalizeHeadersForStorage(payload.headers);
+      const body = normalizeBodyForStorage(payload.body);
+      const upserted = await invoke<StoredRequest>("upsert_request", {
+        id: event.entity_id,
+        collectionId,
+        collection_id: collectionId,
+        name,
+        method,
+        url,
+        headers,
+        body,
+      });
+      setRequestsByCollection((prev) => {
+        const current = prev[upserted.collection_id] || [];
+        const idx = current.findIndex((request) => request.id === upserted.id);
+        if (idx === -1) {
+          return { ...prev, [upserted.collection_id]: [upserted, ...current] };
+        }
+        const nextCollectionRequests = [...current];
+        nextCollectionRequests[idx] = upserted;
+        return { ...prev, [upserted.collection_id]: nextCollectionRequests };
+      });
+      if (activeRequestIdRef.current === upserted.id) {
+        applyStoredRequest(upserted);
+      }
+    }
+  }
+
+  async function readTextFromClipboard() {
+    try {
+      return await navigator.clipboard.readText();
+    } catch {
+      return "";
+    }
+  }
+
+  function writeInternalClipboard(text: string) {
+    try {
+      window.localStorage.setItem(INTERNAL_CLIPBOARD_KEY, text);
+    } catch {
+      // Ignore storage write failures in constrained environments.
+    }
+  }
+
+  function readInternalClipboard() {
+    try {
+      return window.localStorage.getItem(INTERNAL_CLIPBOARD_KEY) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  async function readClipboardPayload() {
+    const text = await readTextFromClipboard();
+    if (text.trim()) {
+      return { text, source: "system" as const };
+    }
+    const fallback = readInternalClipboard();
+    if (fallback.trim()) {
+      return { text: fallback, source: "internal" as const };
+    }
+    return { text: "", source: "none" as const };
+  }
+
+  async function getPasteText(label: string) {
+    const payload = await readClipboardPayload();
+    if (payload.text.trim()) {
+      return payload;
+    }
+
+    const manual = window.prompt(
+      `${label}\nClipboard read is blocked here. Paste JSON manually:`,
+      "",
+    );
+    if (manual && manual.trim()) {
+      writeInternalClipboard(manual);
+      return { text: manual, source: "manual" as const };
+    }
+    return { text: "", source: "none" as const };
+  }
+
+  async function copyTextToClipboard(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(textarea);
+        return ok;
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  function normalizeHeadersForStorage(headers: unknown): string | null {
+    if (headers === null || headers === undefined) {
+      return null;
+    }
+    if (typeof headers === "string") {
+      return headers.trim() ? headers : null;
+    }
+    if (typeof headers === "object") {
+      try {
+        return JSON.stringify(headers);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  function normalizeBodyForStorage(body: unknown): string | null {
+    if (body === null || body === undefined) {
+      return null;
+    }
+    if (typeof body === "string") {
+      return body;
+    }
+    if (typeof body === "object") {
+      try {
+        return JSON.stringify(body, null, 2);
+      } catch {
+        return null;
+      }
+    }
+    return String(body);
+  }
+
+  function toClipboardRequest(raw: unknown) {
+    if (!raw || typeof raw !== "object") {
+      return null;
+    }
+    const item = raw as Record<string, unknown>;
+    if (typeof item.url !== "string") {
+      return null;
+    }
+    return {
+      name: typeof item.name === "string" && item.name.trim() ? item.name.trim() : "Pasted Request",
+      method: typeof item.method === "string" && item.method.trim()
+        ? item.method.toUpperCase()
+        : "GET",
+      url: item.url,
+      headers: normalizeHeadersForStorage(item.headers),
+      body: normalizeBodyForStorage(item.body),
+    };
+  }
+
+  function getClipboardRequests(payload: unknown) {
+    if (!payload || typeof payload !== "object") {
+      return [];
+    }
+    const item = payload as Record<string, unknown>;
+    if (item.kind === "request") {
+      const request = toClipboardRequest(item.request);
+      return request ? [request] : [];
+    }
+    if (Array.isArray(item.requests)) {
+      return item.requests
+        .map((entry) => toClipboardRequest(entry))
+        .filter((request): request is NonNullable<typeof request> => Boolean(request));
+    }
+    const directRequest = toClipboardRequest(item);
+    return directRequest ? [directRequest] : [];
   }
 
   async function fetchCollections() {
@@ -132,6 +621,11 @@ function App() {
       });
     } catch (error) {
       console.error("Failed to fetch collections:", error);
+      showToast({
+        kind: "error",
+        title: "Failed to load collections",
+        description: String(error),
+      });
     }
   }
 
@@ -156,6 +650,11 @@ function App() {
       }
     } catch (error) {
       console.error("Failed to fetch requests:", error);
+      showToast({
+        kind: "error",
+        title: "Failed to load requests",
+        description: String(error),
+      });
     } finally {
       setIsLoadingRequests(false);
     }
@@ -180,18 +679,186 @@ function App() {
       setExpandedCollections((prev) => ({ ...prev, [newCollection.id]: true }));
       setActiveCollectionId(newCollection.id);
       setActiveRequestId(null);
+      void broadcastSyncEvent("Create", "Collection", newCollection.id, newCollection);
+      showToast({
+        kind: "success",
+        title: "Collection created",
+        description: newCollection.name,
+      });
     } catch (error) {
-      alert(`Error creating collection: ${String(error)}`);
+      showToast({
+        kind: "error",
+        title: "Error creating collection",
+        description: String(error),
+      });
     }
   }
 
-  async function handleCreateRequestClick() {
-    if (!activeCollectionId) {
-      alert("Create or select a collection first.");
+  async function handleRenameCollection(collection: Collection) {
+    const name = window.prompt("Rename collection:", collection.name);
+    if (!name || !name.trim() || name.trim() === collection.name) {
+      return;
+    }
+    try {
+      const updated = await invoke<Collection>("rename_collection", {
+        id: collection.id,
+        name: name.trim(),
+      });
+      setCollections((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      void broadcastSyncEvent("Update", "Collection", updated.id, updated);
+      showToast({ kind: "success", title: "Collection renamed", description: updated.name });
+    } catch (error) {
+      showToast({ kind: "error", title: "Error renaming collection", description: String(error) });
+    }
+  }
+
+  async function handleDuplicateCollection(collection: Collection) {
+    const name = window.prompt("Duplicate collection as:", `${collection.name} Copy`);
+    if (!name || !name.trim()) {
+      return;
+    }
+    const newId = generateId();
+    try {
+      const duplicated = await invoke<Collection>("duplicate_collection", {
+        sourceId: collection.id,
+        source_id: collection.id,
+        newId,
+        new_id: newId,
+        newName: name.trim(),
+        new_name: name.trim(),
+      });
+      setCollections((prev) => [...prev, duplicated]);
+      setExpandedCollections((prev) => ({ ...prev, [duplicated.id]: true }));
+      setActiveCollectionId(duplicated.id);
+      setActiveRequestId(null);
+      await fetchRequests(duplicated.id);
+      void broadcastSyncEvent("Create", "Collection", duplicated.id, duplicated);
+      const duplicatedRequests = await invoke<StoredRequest[]>("get_requests_by_collection", {
+        collectionId: duplicated.id,
+        collection_id: duplicated.id,
+      });
+      duplicatedRequests.forEach((request) => {
+        void broadcastSyncEvent("Create", "Request", request.id, request);
+      });
+      showToast({
+        kind: "success",
+        title: "Collection duplicated",
+        description: duplicated.name,
+      });
+    } catch (error) {
+      showToast({ kind: "error", title: "Error duplicating collection", description: String(error) });
+    }
+  }
+
+  async function handleDeleteCollection(collection: Collection) {
+    const ok = window.confirm(`Delete collection "${collection.name}" and all its requests?`);
+    if (!ok) {
+      return;
+    }
+    try {
+      await invoke("delete_collection", { id: collection.id });
+      const nextCollections = collections.filter((item) => item.id !== collection.id);
+      setCollections(nextCollections);
+      setRequestsByCollection((prev) => {
+        const next = { ...prev };
+        delete next[collection.id];
+        return next;
+      });
+      setExpandedCollections((prev) => {
+        const next = { ...prev };
+        delete next[collection.id];
+        return next;
+      });
+
+      if (activeCollectionId === collection.id) {
+        const nextActive = nextCollections[0]?.id ?? null;
+        setActiveCollectionId(nextActive);
+        setActiveRequestId(null);
+      }
+      void broadcastSyncEvent("Delete", "Collection", collection.id, {
+        id: collection.id,
+      });
+      showToast({ kind: "success", title: "Collection deleted", description: collection.name });
+    } catch (error) {
+      showToast({ kind: "error", title: "Error deleting collection", description: String(error) });
+    }
+  }
+
+  async function handleCopyCollection(collection: Collection) {
+    const payload = {
+      kind: "collection",
+      collection,
+      requests: requestsByCollection[collection.id] || [],
+    };
+    const serialized = JSON.stringify(payload, null, 2);
+    writeInternalClipboard(serialized);
+    const copied = await copyTextToClipboard(serialized);
+    if (copied) {
+      showToast({ kind: "success", title: "Collection copied", description: collection.name });
+    } else {
+      showToast({
+        kind: "info",
+        title: "Copied in app",
+        description: "System clipboard blocked; in-app paste is still available.",
+      });
+    }
+  }
+
+  function handleTogglePeerConnection(peerIp: string) {
+    setConnectedPeerIps((prev) => ({ ...prev, [peerIp]: !prev[peerIp] }));
+  }
+
+  async function handleSharePeer(peerName: string, peerIp: string) {
+    if (!activeCollection) {
+      showToast({
+        kind: "info",
+        title: "Nothing to share",
+        description: "Select a collection first.",
+      });
       return;
     }
 
-    const name = window.prompt("Enter request name:", "New Request");
+    setSharingPeerIp(peerIp);
+    try {
+      const requests = await invoke<StoredRequest[]>("get_requests_by_collection", {
+        collectionId: activeCollection.id,
+        collection_id: activeCollection.id,
+      });
+      const events: SyncEvent[] = [
+        createSyncEvent("Create", "Collection", activeCollection.id, activeCollection),
+        ...requests.map((request) => createSyncEvent("Create", "Request", request.id, request)),
+      ];
+      await sendSyncEventsToPeer(peerIp, events);
+      setConnectedPeerIps((prev) => ({ ...prev, [peerIp]: true }));
+      showToast({
+        kind: "success",
+        title: "Collection shared",
+        description: `${activeCollection.name} -> ${peerName.split(".")[0]}`,
+      });
+    } catch (error) {
+      showToast({
+        kind: "error",
+        title: "Share failed",
+        description: String(error),
+      });
+    } finally {
+      setSharingPeerIp(null);
+    }
+  }
+
+  async function handleCreateRequestClick(collectionIdArg?: string) {
+    const collectionId = collectionIdArg || activeCollectionId;
+    if (!collectionId) {
+      showToast({
+        kind: "info",
+        title: "No active collection",
+        description: "Create or select a collection first.",
+      });
+      return;
+    }
+
+    const requestCount = (requestsByCollection[collectionId] || []).length;
+    const name = window.prompt("Enter request name:", `New Request ${requestCount + 1}`);
     if (!name || !name.trim()) {
       return;
     }
@@ -201,8 +868,8 @@ function App() {
       const headers = headerRowsToObject(reqHeaders);
       const created = await invoke<StoredRequest>("create_request", {
         id: generateId(),
-        collectionId: activeCollectionId,
-        collection_id: activeCollectionId,
+        collectionId,
+        collection_id: collectionId,
         name: name.trim(),
         method: reqMethod,
         url: reqUrl,
@@ -211,15 +878,345 @@ function App() {
       });
 
       setRequestsByCollection((prev) => {
-        const current = prev[activeCollectionId] || [];
-        return { ...prev, [activeCollectionId]: [created, ...current] };
+        const current = prev[collectionId] || [];
+        return { ...prev, [collectionId]: [created, ...current] };
       });
+      setExpandedCollections((prev) => ({ ...prev, [collectionId]: true }));
+      setActiveCollectionId(collectionId);
       setActiveRequestId(created.id);
       applyStoredRequest(created);
+      void broadcastSyncEvent("Create", "Request", created.id, created);
+      showToast({
+        kind: "success",
+        title: "Request created",
+        description: `${created.method} ${created.name}`,
+      });
     } catch (error) {
-      alert(`Error creating request: ${String(error)}`);
+      showToast({
+        kind: "error",
+        title: "Error creating request",
+        description: String(error),
+      });
     } finally {
       setIsCreatingRequest(false);
+    }
+  }
+
+  async function handleRenameRequest(request: StoredRequest) {
+    const name = window.prompt("Rename request:", request.name);
+    if (!name || !name.trim() || name.trim() === request.name) {
+      return;
+    }
+    try {
+      const updated = await invoke<StoredRequest>("rename_request", {
+        id: request.id,
+        name: name.trim(),
+      });
+      setRequestsByCollection((prev) => {
+        const current = prev[updated.collection_id] || [];
+        return {
+          ...prev,
+          [updated.collection_id]: current.map((item) => (item.id === updated.id ? updated : item)),
+        };
+      });
+      if (activeRequestId === updated.id) {
+        setActiveRequestId(updated.id);
+      }
+      void broadcastSyncEvent("Update", "Request", updated.id, updated);
+      showToast({ kind: "success", title: "Request renamed", description: updated.name });
+    } catch (error) {
+      showToast({ kind: "error", title: "Error renaming request", description: String(error) });
+    }
+  }
+
+  async function handleDuplicateRequest(request: StoredRequest) {
+    const name = window.prompt("Duplicate request as:", `${request.name} Copy`);
+    if (!name || !name.trim()) {
+      return;
+    }
+    const newId = generateId();
+    try {
+      const duplicated = await invoke<StoredRequest>("duplicate_request", {
+        sourceId: request.id,
+        source_id: request.id,
+        newId,
+        new_id: newId,
+        newName: name.trim(),
+        new_name: name.trim(),
+      });
+      setRequestsByCollection((prev) => {
+        const current = prev[duplicated.collection_id] || [];
+        return { ...prev, [duplicated.collection_id]: [duplicated, ...current] };
+      });
+      setExpandedCollections((prev) => ({ ...prev, [duplicated.collection_id]: true }));
+      setActiveCollectionId(duplicated.collection_id);
+      setActiveRequestId(duplicated.id);
+      applyStoredRequest(duplicated);
+      void broadcastSyncEvent("Create", "Request", duplicated.id, duplicated);
+      showToast({
+        kind: "success",
+        title: "Request duplicated",
+        description: `${duplicated.method} ${duplicated.name}`,
+      });
+    } catch (error) {
+      showToast({ kind: "error", title: "Error duplicating request", description: String(error) });
+    }
+  }
+
+  async function handleDeleteRequest(request: StoredRequest) {
+    const ok = window.confirm(`Delete request "${request.name}"?`);
+    if (!ok) {
+      return;
+    }
+    try {
+      await invoke("delete_request", { id: request.id });
+      const current = requestsByCollection[request.collection_id] || [];
+      const remaining = current.filter((item) => item.id !== request.id);
+      setRequestsByCollection((prev) => ({ ...prev, [request.collection_id]: remaining }));
+
+      if (activeRequestId === request.id) {
+        const nextActive = remaining[0] || null;
+        setActiveRequestId(nextActive?.id || null);
+        if (nextActive) {
+          applyStoredRequest(nextActive);
+        }
+      }
+      void broadcastSyncEvent("Delete", "Request", request.id, {
+        id: request.id,
+        collection_id: request.collection_id,
+      });
+      showToast({ kind: "success", title: "Request deleted", description: request.name });
+    } catch (error) {
+      showToast({ kind: "error", title: "Error deleting request", description: String(error) });
+    }
+  }
+
+  async function handleCopyRequest(request: StoredRequest) {
+    let parsedHeaders: unknown = request.headers;
+    if (request.headers) {
+      try {
+        parsedHeaders = JSON.parse(request.headers);
+      } catch {
+        parsedHeaders = request.headers;
+      }
+    }
+    const payload = {
+      kind: "request",
+      request: {
+        ...request,
+        headers: parsedHeaders,
+      },
+    };
+    const serialized = JSON.stringify(payload, null, 2);
+    writeInternalClipboard(serialized);
+    const copied = await copyTextToClipboard(serialized);
+    if (copied) {
+      showToast({ kind: "success", title: "Request copied", description: request.name });
+    } else {
+      showToast({
+        kind: "info",
+        title: "Copied in app",
+        description: "System clipboard blocked; in-app paste is still available.",
+      });
+    }
+  }
+
+  async function handlePasteCollection() {
+    const { text, source } = await getPasteText("Paste Collection");
+    if (!text.trim()) {
+      showToast({
+        kind: "info",
+        title: "Clipboard is empty",
+        description: "Copy a collection payload and try again.",
+      });
+      return;
+    }
+
+    if (source === "internal") {
+      showToast({
+        kind: "info",
+        title: "Using in-app clipboard",
+        description: "System clipboard access is blocked in this environment.",
+      });
+    } else if (source === "manual") {
+      showToast({
+        kind: "info",
+        title: "Using manual paste",
+        description: "Pasted from prompt input.",
+      });
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      showToast({
+        kind: "error",
+        title: "Invalid clipboard data",
+        description: "Clipboard content is not valid JSON.",
+      });
+      return;
+    }
+
+    if (!parsed || typeof parsed !== "object") {
+      showToast({
+        kind: "error",
+        title: "Invalid collection payload",
+        description: "No collection data found in clipboard.",
+      });
+      return;
+    }
+
+    const payload = parsed as Record<string, unknown>;
+    const sourceCollection = payload.collection && typeof payload.collection === "object"
+      ? (payload.collection as Record<string, unknown>)
+      : payload;
+    const baseName = typeof sourceCollection.name === "string" && sourceCollection.name.trim()
+      ? sourceCollection.name.trim()
+      : "Pasted Collection";
+
+    const name = window.prompt("Paste collection as:", `${baseName} Copy`);
+    if (!name || !name.trim()) {
+      return;
+    }
+
+    try {
+      const createdCollection = await invoke<Collection>("create_collection", {
+        id: generateId(),
+        name: name.trim(),
+        ownerId: LOCAL_USER_ID,
+        owner_id: LOCAL_USER_ID,
+      });
+
+      setCollections((prev) => [...prev, createdCollection]);
+      setRequestsByCollection((prev) => ({ ...prev, [createdCollection.id]: [] }));
+      setExpandedCollections((prev) => ({ ...prev, [createdCollection.id]: true }));
+      setActiveCollectionId(createdCollection.id);
+      setActiveRequestId(null);
+
+      const requestsToCreate = getClipboardRequests(parsed);
+      let createdCount = 0;
+      const createdRequests: StoredRequest[] = [];
+      for (const request of requestsToCreate) {
+        const created = await invoke<StoredRequest>("create_request", {
+          id: generateId(),
+          collectionId: createdCollection.id,
+          collection_id: createdCollection.id,
+          name: request.name,
+          method: request.method,
+          url: request.url,
+          headers: request.headers,
+          body: request.body,
+        });
+        createdRequests.push(created);
+        createdCount += 1;
+      }
+
+      await fetchRequests(createdCollection.id);
+      void broadcastSyncEvent("Create", "Collection", createdCollection.id, createdCollection);
+      createdRequests.forEach((request) => {
+        void broadcastSyncEvent("Create", "Request", request.id, request);
+      });
+      showToast({
+        kind: "success",
+        title: "Collection pasted",
+        description: `${createdCollection.name}${createdCount > 0 ? ` (${createdCount} requests)` : ""}`,
+      });
+    } catch (error) {
+      showToast({
+        kind: "error",
+        title: "Error pasting collection",
+        description: String(error),
+      });
+    }
+  }
+
+  async function handlePasteRequest(collectionId: string) {
+    const { text, source } = await getPasteText("Paste Request");
+    if (!text.trim()) {
+      showToast({
+        kind: "info",
+        title: "Clipboard is empty",
+        description: "Copy a request payload and try again.",
+      });
+      return;
+    }
+
+    if (source === "internal") {
+      showToast({
+        kind: "info",
+        title: "Using in-app clipboard",
+        description: "System clipboard access is blocked in this environment.",
+      });
+    } else if (source === "manual") {
+      showToast({
+        kind: "info",
+        title: "Using manual paste",
+        description: "Pasted from prompt input.",
+      });
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      showToast({
+        kind: "error",
+        title: "Invalid clipboard data",
+        description: "Clipboard content is not valid JSON.",
+      });
+      return;
+    }
+
+    const requestsToCreate = getClipboardRequests(parsed);
+    if (requestsToCreate.length === 0) {
+      showToast({
+        kind: "info",
+        title: "No request data found",
+        description: "Copy a request and try again.",
+      });
+      return;
+    }
+
+    try {
+      let lastCreated: StoredRequest | null = null;
+      const createdRequests: StoredRequest[] = [];
+      for (const request of requestsToCreate) {
+        const baseName = request.name || "Pasted Request";
+        lastCreated = await invoke<StoredRequest>("create_request", {
+          id: generateId(),
+          collectionId,
+          collection_id: collectionId,
+          name: `${baseName} Copy`,
+          method: request.method,
+          url: request.url,
+          headers: request.headers,
+          body: request.body,
+        });
+        createdRequests.push(lastCreated);
+      }
+
+      await fetchRequests(collectionId);
+      setExpandedCollections((prev) => ({ ...prev, [collectionId]: true }));
+      setActiveCollectionId(collectionId);
+      if (lastCreated) {
+        setActiveRequestId(lastCreated.id);
+        applyStoredRequest(lastCreated);
+      }
+      createdRequests.forEach((request) => {
+        void broadcastSyncEvent("Create", "Request", request.id, request);
+      });
+      showToast({
+        kind: "success",
+        title: "Request pasted",
+        description: `${requestsToCreate.length} request${requestsToCreate.length === 1 ? "" : "s"} added`,
+      });
+    } catch (error) {
+      showToast({
+        kind: "error",
+        title: "Error pasting request",
+        description: String(error),
+      });
     }
   }
 
@@ -268,8 +1265,67 @@ function App() {
         body: "",
         time_ms: 0,
       });
+      showToast({
+        kind: "error",
+        title: "Request failed",
+        description: String(error),
+      });
     } finally {
       setIsSending(false);
+    }
+  }
+
+  async function handleSaveRequest() {
+    if (!activeCollectionId) {
+      showToast({
+        kind: "info",
+        title: "No active collection",
+        description: "Create or select a collection first.",
+      });
+      return;
+    }
+
+    if (!activeRequestId) {
+      await handleCreateRequestClick();
+      return;
+    }
+
+    setIsSavingRequest(true);
+    try {
+      const headers = headerRowsToObject(reqHeaders);
+      const updated = await invoke<StoredRequest>("update_request", {
+        id: activeRequestId,
+        name: activeRequest?.name || "Untitled Request",
+        method: reqMethod,
+        url: reqUrl,
+        headers: Object.keys(headers).length > 0 ? JSON.stringify(headers) : null,
+        body: reqBody || null,
+      });
+
+      setRequestsByCollection((prev) => {
+        const current = prev[activeCollectionId] || [];
+        return {
+          ...prev,
+          [activeCollectionId]: current.map((request) =>
+            request.id === updated.id ? updated : request,
+          ),
+        };
+      });
+      applyStoredRequest(updated);
+      void broadcastSyncEvent("Update", "Request", updated.id, updated);
+      showToast({
+        kind: "success",
+        title: "Request saved",
+        description: `${updated.method} ${updated.url}`,
+      });
+    } catch (error) {
+      showToast({
+        kind: "error",
+        title: "Error saving request",
+        description: String(error),
+      });
+    } finally {
+      setIsSavingRequest(false);
     }
   }
 
@@ -277,7 +1333,7 @@ function App() {
 
   return (
     <div className="flex flex-col h-screen w-full bg-[#121212] text-gray-200 font-sans overflow-hidden">
-      <TopBar peersCount={peersCount} />
+      <TopBar peersCount={peersCount} workspaceOptions={workspaceOptions} />
 
       <div className="flex-1 flex overflow-hidden">
         <CollectionsSidebar
@@ -294,8 +1350,19 @@ function App() {
           }}
           onCreateCollection={handleCreateCollectionClick}
           onCreateRequest={handleCreateRequestClick}
+          onCopyCollection={handleCopyCollection}
+          onPasteCollection={handlePasteCollection}
+          onRenameCollection={handleRenameCollection}
+          onDuplicateCollection={handleDuplicateCollection}
+          onDeleteCollection={handleDeleteCollection}
+          onCopyRequest={handleCopyRequest}
+          onPasteRequest={handlePasteRequest}
+          onRenameRequest={handleRenameRequest}
+          onDuplicateRequest={handleDuplicateRequest}
+          onDeleteRequest={handleDeleteRequest}
           isLoadingRequests={isLoadingRequests}
           isCreatingRequest={isCreatingRequest}
+          peersCount={peersCount}
         />
 
         <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e]">
@@ -303,7 +1370,13 @@ function App() {
             activeCollectionName={activeCollection?.name || ""}
             activeRequestName={activeRequest?.name || ""}
             isCreatingRequest={isCreatingRequest}
-            onCreateRequest={handleCreateRequestClick}
+            isSavingRequest={isSavingRequest}
+            onCreateRequest={() => {
+              void handleCreateRequestClick();
+            }}
+            onSaveRequest={() => {
+              void handleSaveRequest();
+            }}
             reqMethod={reqMethod}
             setReqMethod={setReqMethod}
             reqUrl={reqUrl}
@@ -334,8 +1407,13 @@ function App() {
           peers={peers}
           activeCollectionName={activeCollection?.name || ""}
           activeRequestsCount={activeRequests.length}
+          connectedPeerIps={connectedPeerIps}
+          sharingPeerIp={sharingPeerIp}
+          onTogglePeerConnection={handleTogglePeerConnection}
+          onSharePeer={handleSharePeer}
         />
       </div>
+      <ToastViewport toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
