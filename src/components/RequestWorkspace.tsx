@@ -80,7 +80,7 @@ export function RequestWorkspace({
   const METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH"];
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 bg-background relative selection:bg-primary/30">
+    <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-background relative selection:bg-primary/30">
       <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-background">
         <div className="flex flex-col space-y-1">
           <div className="flex items-center space-x-2 text-[12px] text-muted font-bold uppercase tracking-widest">
@@ -99,11 +99,10 @@ export function RequestWorkspace({
             onClick={onSaveRequest}
             disabled={isSavingRequest || (!isDirty && activeRequestName !== "")}
             title="Save Request (Ctrl+S)"
-            className={`h-9 px-4 rounded border font-semibold text-[13px] flex items-center space-x-2 transition-all active:scale-95 disabled:opacity-30 ${
-              isDirty 
-                ? "bg-primary/10 border-primary text-primary hover:bg-primary/20" 
+            className={`h-9 px-4 rounded border font-semibold text-[13px] flex items-center space-x-2 transition-all active:scale-95 disabled:opacity-30 ${isDirty
+                ? "bg-primary/10 border-primary text-primary hover:bg-primary/20"
                 : "bg-transparent border-border hover:bg-surface-hover text-gray-400"
-            }`}
+              }`}
           >
             <Save size={14} strokeWidth={2.5} />
             <span>{isSavingRequest ? "Saving..." : "Save"}</span>
@@ -156,11 +155,11 @@ export function RequestWorkspace({
             )}
           </div>
 
-           <VariableInput
+          <VariableInput
             value={reqUrl}
             onChange={setReqUrl}
             placeholder="https://api.example.com/v1/resource"
-            className="flex-1 bg-transparent px-5 py-2.5 text-gray-100 placeholder-muted/50 focus:outline-none text-[15px] font-medium"
+            className="flex-1 w-full bg-transparent px-5 py-2.5 text-gray-100 placeholder-muted/50 focus:outline-none text-[15px] font-medium"
             environments={environments}
             activeEnvId={activeEnvId}
             onEnter={onSendRequest}
@@ -194,10 +193,9 @@ export function RequestWorkspace({
                 key={tab}
                 onClick={() => setActiveWorkspaceTab(tab)}
                 className={`px-4 py-3 text-[12px] font-bold uppercase tracking-wider transition-all relative
-                  ${
-                    activeWorkspaceTab === tab
-                      ? "text-primary"
-                      : "text-muted hover:text-gray-300"
+                  ${activeWorkspaceTab === tab
+                    ? "text-primary"
+                    : "text-muted hover:text-gray-300"
                   }`}
               >
                 {tab}
@@ -208,19 +206,19 @@ export function RequestWorkspace({
             ))}
           </div>
 
-          <div className="flex-1 overflow-hidden relative bg-background">
+          <div className="flex-1 min-h-0 overflow-hidden relative bg-background">
             {activeWorkspaceTab === "Headers" && (
-              <KeyValueEditor 
-                items={reqHeaders} 
-                setItems={setReqHeaders} 
+              <KeyValueEditor
+                items={reqHeaders}
+                setItems={setReqHeaders}
                 environments={environments}
                 activeEnvId={activeEnvId}
               />
             )}
             {activeWorkspaceTab === "Params" && (
-              <KeyValueEditor 
-                items={reqParams} 
-                setItems={setReqParams} 
+              <KeyValueEditor
+                items={reqParams}
+                setItems={setReqParams}
                 environments={environments}
                 activeEnvId={activeEnvId}
               />
@@ -242,13 +240,13 @@ export function RequestWorkspace({
                     ))}
                   </div>
                   <div className="flex-1 relative overflow-hidden">
-                    <div 
+                    <div
                       id="req-body-highlight"
                       className="absolute inset-0 p-4 font-mono text-[14px] leading-[21px] pointer-events-none whitespace-pre overflow-hidden"
                     >
                       {reqBody.split(/(".*?"|[:{}\[\]\s,]+|\d+|true|false|null)/g).map((token, i, arr) => {
                         if (/^".*"$/.test(token)) {
-                          if (arr[i+1]?.includes(':')) return <span key={i} className="text-[#9CDCFE]">{token}</span>;
+                          if (arr[i + 1]?.includes(':')) return <span key={i} className="text-[#9CDCFE]">{token}</span>;
                           return <span key={i} className="text-[#CE9178]">{token}</span>;
                         }
                         if (/^\d+$/.test(token)) return <span key={i} className="text-[#B5CEA8]">{token}</span>;
@@ -271,7 +269,7 @@ export function RequestWorkspace({
                           highlight.scrollLeft = target.scrollLeft;
                         }
                       }}
-                      className="w-full h-full bg-transparent p-4 text-[14px] font-mono text-transparent caret-white focus:outline-none resize-none leading-[21px] selection:bg-primary/20 relative z-10 whitespace-pre overflow-auto scrollbar-hide"
+                      className="w-full h-full bg-transparent p-4 text-[14px] font-mono text-transparent caret-white focus:outline-none resize-none leading-[21px] selection:bg-primary/20 relative z-10 whitespace-pre overflow-auto"
                     />
                   </div>
                 </div>

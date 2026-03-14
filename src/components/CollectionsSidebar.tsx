@@ -1,4 +1,4 @@
-import { ChevronRight, Folder as FolderIcon, MoreHorizontal, Plus, GripVertical } from "lucide-react";
+import { ChevronRight, Folder as FolderIcon, MoreHorizontal, Plus, GripVertical, Upload } from "lucide-react";
 import { useMemo, useState, useCallback } from "react";
 import { 
   DndContext, 
@@ -55,6 +55,7 @@ type Props = {
   isLoadingRequests: boolean;
   isCreatingRequest: boolean;
   activeRequestIsDirty: boolean;
+  onImport: () => void;
   peersCount: number;
 };
 
@@ -486,6 +487,7 @@ export function CollectionsSidebar({
   isLoadingRequests,
   isCreatingRequest,
   activeRequestIsDirty,
+  onImport,
   peersCount,
 }: Props) {
   const [openCollectionMenuId, setOpenCollectionMenuId] = useState<string | null>(null);
@@ -638,14 +640,10 @@ export function CollectionsSidebar({
             <span>{isCreatingRequest ? "Creating..." : "New Collection"}</span>
           </button>
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onPasteCollection();
-            }}
-            disabled={isCreatingRequest}
-            className="w-full h-8 flex items-center justify-center bg-transparent border border-border hover:bg-surface-hover text-gray-400 hover:text-gray-200 rounded-md transition-colors text-[12px] font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={onImport}
+            className="w-full h-8 flex items-center justify-center bg-transparent border border-border hover:bg-surface-hover text-gray-400 hover:text-gray-200 rounded-md transition-colors text-[12px] font-medium"
           >
-            Paste Collection
+            Import
           </button>
         </div>
 
@@ -655,12 +653,22 @@ export function CollectionsSidebar({
               <span className="text-[11px] font-bold text-muted tracking-widest uppercase">
                 Collections
               </span>
-              <button 
-                onClick={onCreateCollection}
-                className="p-1 hover:bg-surface-hover rounded text-muted hover:text-gray-200 transition-colors"
-              >
-                <Plus size={14} />
-              </button>
+              <div className="flex items-center space-x-1">
+                <button 
+                  onClick={onPasteCollection}
+                  className="p-1 hover:bg-surface-hover rounded text-muted hover:text-gray-200 transition-colors"
+                  title="Paste Collection"
+                >
+                  <Upload size={14} />
+                </button>
+                <button 
+                  onClick={onCreateCollection}
+                  className="p-1 hover:bg-surface-hover rounded text-muted hover:text-gray-200 transition-colors"
+                  title="New Collection"
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
             </div>
 
             <div className="mt-1 flex flex-col font-medium text-[13px]">

@@ -30,7 +30,9 @@ export type StoredRequest = {
   url: string;
   headers?: string | null;
   body?: string | null;
+  params?: string | null;
   position: number;
+  created_at?: string;
 };
 
 export type KeyValuePair = {
@@ -63,7 +65,7 @@ export type HttpErrorResult = {
 export type ResponseState = HttpResponseResult | HttpErrorResult | null;
 
 export type SyncAction = "Create" | "Update" | "Delete";
-export type SyncEntityType = "Collection" | "Request";
+export type SyncEntityType = "Collection" | "Folder" | "Request";
 
 export type SyncEvent = {
   event_id: string;

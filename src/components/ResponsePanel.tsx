@@ -8,9 +8,10 @@ type Props = {
   isSending: boolean;
   respTab: ResponseTab;
   setRespTab: (tab: ResponseTab) => void;
+  height?: number;
 };
 
-export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab }: Props) {
+export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab, height }: Props) {
   const [viewMode, setViewMode] = useState<BodyViewMode>("pretty");
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -68,7 +69,10 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab }: P
   }, [reqResponse]);
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-background relative border-t border-border/50">
+    <div 
+      className={`flex flex-col min-h-0 bg-background relative border-t border-border/50 ${!height ? 'flex-1' : ''}`}
+      style={height ? { height: `${height}px`, maxHeight: '80vh' } : {}}
+    >
       <div className="flex items-center justify-between px-6 py-3 bg-surface/20 border-b border-border shrink-0">
         <span className="text-[11px] font-bold uppercase tracking-widest text-muted">Response</span>
         {reqResponse && (

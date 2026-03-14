@@ -32,7 +32,9 @@ import {
   resolveVariables,
 } from "./utils";
 import { EnvironmentManager } from "./components/EnvironmentManager";
+import { ImportModal } from "./components/ImportModal";
 import { v4 as uuidv4 } from "uuid";
+import { parseCurl, parsePostman } from "./utils";
 import "./App.css";
 
 function App() {
@@ -60,6 +62,13 @@ function App() {
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [activeEnvId, setActiveEnvId] = useState<string | null>(null);
   const [isEnvManagerOpen, setIsEnvManagerOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+  const [responseHeight, setResponseHeight] = useState(() => {
+    const saved = localStorage.getItem("devcollab.responseHeight");
+    return saved ? parseInt(saved, 10) : 320;
+  });
+  const [isResizing, setIsResizing] = useState(false);
 
   const [peers, setPeers] = useState<Record<string, string>>({});
   const [connectedPeerIps, setConnectedPeerIps] = useState<Record<string, boolean>>({});
@@ -141,6 +150,37 @@ function App() {
       JSON.stringify(currentHeadersObj) !== JSON.stringify(savedHeadersObj)
     );
   }, [activeRequest, reqMethod, reqUrl, reqBody, reqHeaders]);
+
+  // Resize handlers
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      // Calculate new height based on mouse position from the bottom of the window
+      // We want to keep it between a min and max range
+      const newHeight = window.innerHeight - e.clientY;
+      if (newHeight > 100 && newHeight < window.innerHeight * 0.8) {
+        setResponseHeight(newHeight);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      localStorage.setItem("devcollab.responseHeight", responseHeight.toString());
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing, responseHeight]);
 
   const workspaceOptions = useMemo(
     () => Array.from(new Set(collections.map((collection) => collection.name))).filter(Boolean),
@@ -296,6 +336,128 @@ function App() {
 
   function toggleFolderExpanded(id: string) {
     setExpandedFolders((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  async function handleImportCurl(curl: string) {
+    try {
+      const parsed = parseCurl(curl);
+      let collectionId = activeCollectionId;
+
+      if (!collectionId) {
+        const newColId = generateId();
+        const created = await invoke<Collection>("create_collection", {
+          id: newColId,
+          name: "Imported cURL",
+          workspace_id: activeWorkspaceId,
+        });
+        setCollections((prev) => [...prev, created]);
+        collectionId = created.id;
+        setActiveCollectionId(created.id);
+        void broadcastSyncEvent("Create", "Collection", created.id, created);
+      }
+
+      const requestId = generateId();
+      const newRequest: StoredRequest = {
+        id: requestId,
+        collection_id: collectionId!,
+        folder_id: null,
+        name: `cURL Request - ${new Date().toLocaleTimeString()}`,
+        method: parsed.method,
+        url: parsed.url,
+        body: parsed.body,
+        headers: JSON.stringify(headerRowsToObject(parsed.headers)),
+        params: JSON.stringify({}),
+        position: 0,
+        created_at: new Date().toISOString(),
+      };
+
+      await invoke("create_request", {
+        id: newRequest.id,
+        collectionId: newRequest.collection_id,
+        collection_id: newRequest.collection_id,
+        folder_id: null,
+        name: newRequest.name,
+        method: newRequest.method,
+        url: newRequest.url,
+        headers: newRequest.headers,
+        body: newRequest.body,
+        params: newRequest.params,
+        position: 0,
+      });
+
+      setRequestsByCollection((prev) => ({
+        ...prev,
+        [collectionId!]: [...(prev[collectionId!] || []), newRequest],
+      }));
+
+      setActiveRequestId(requestId);
+      applyStoredRequest(newRequest);
+      void broadcastSyncEvent("Create", "Request", requestId, newRequest);
+      
+      showToast({ kind: "success", title: "cURL Imported", description: "Request created successfully" });
+      setIsImportModalOpen(false);
+    } catch (error) {
+      showToast({ kind: "error", title: "Import Failed", description: String(error) });
+    }
+  }
+
+  async function handleImportPostman(json: any) {
+    try {
+      const { collections: newCols, folders: newFolders, requests: newReqs } = parsePostman(json);
+
+      for (const col of newCols) {
+        const createdCol = await invoke<Collection>("create_collection", {
+          id: col.id,
+          name: col.name,
+          workspace_id: activeWorkspaceId,
+        });
+        setCollections((prev) => [...prev, createdCol]);
+        void broadcastSyncEvent("Create", "Collection", createdCol.id, createdCol);
+
+        // Import folders for this collection
+        const colFolders = newFolders.filter(f => f.collection_id === col.id);
+        for (const folder of colFolders) {
+          await invoke("create_folder", {
+            id: folder.id,
+            collectionId: folder.collection_id,
+            collection_id: folder.collection_id,
+            name: folder.name,
+            position: 0,
+          });
+          void broadcastSyncEvent("Create", "Folder", folder.id, folder);
+        }
+
+        // Import requests for this collection
+        const colReqs = newReqs.filter(r => r.collection_id === col.id);
+        for (const req of colReqs) {
+          await invoke("create_request", {
+            id: req.id,
+            collectionId: req.collection_id,
+            collection_id: req.collection_id,
+            folderId: req.folder_id,
+            folder_id: req.folder_id,
+            name: req.name,
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            body: req.body,
+            params: req.params,
+            position: 0,
+          });
+          void broadcastSyncEvent("Create", "Request", req.id, req);
+        }
+        
+        // Refresh local state for this collection
+        await fetchRequests(createdCol.id);
+        setExpandedCollections(prev => ({ ...prev, [createdCol.id]: true }));
+      }
+
+      showToast({ kind: "success", title: "Postman Import Complete", description: `Imported ${newCols.length} collections` });
+      setIsImportModalOpen(false);
+    } catch (error) {
+      console.error("Postman import error:", error);
+      showToast({ kind: "error", title: "Import Failed", description: String(error) });
+    }
   }
 
   const showToast = useCallback((toast: Omit<ToastMessage, "id">) => {
@@ -1871,13 +2033,14 @@ function App() {
             onRenameRequest={handleRenameRequest}
             onDuplicateRequest={handleDuplicateRequest}
             onDeleteRequest={handleDeleteRequest}
+            onImport={() => setIsImportModalOpen(true)}
             isLoadingRequests={isLoadingRequests}
             isCreatingRequest={isCreatingRequest}
             peersCount={peersCount}
           />
         )}
 
-        <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e]">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#1e1e1e]">
           <RequestWorkspace
             activeCollectionName={activeCollection?.name || ""}
             activeRequestName={activeRequest?.name || ""}
@@ -1910,11 +2073,19 @@ function App() {
             activeEnvId={activeEnvId}
           />
 
+          <div
+            className={`h-1.5 w-full bg-border/20 cursor-ns-resize hover:bg-primary/40 transition-colors shrink-0 z-10 flex items-center justify-center relative group ${isResizing ? 'bg-primary/50' : ''}`}
+            onMouseDown={handleResizeStart}
+          >
+            <div className={`w-8 h-0.5 rounded-full bg-border group-hover:bg-primary/60 transition-colors ${isResizing ? 'bg-primary' : ''}`} />
+          </div>
+
           <ResponsePanel
             reqResponse={reqResponse}
             isSending={isSending}
             respTab={respTab}
             setRespTab={setRespTab}
+            height={responseHeight}
           />
         </div>
 
@@ -1962,6 +2133,13 @@ function App() {
         onCreate={(name) => handleCreateEnvironment(name)}
         onUpdate={handleUpdateEnvironment}
         onDelete={handleDeleteEnvironment}
+      />
+
+      <ImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onImportCurl={handleImportCurl}
+        onImportPostman={handleImportPostman}
       />
     </div>
   );
