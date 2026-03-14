@@ -76,3 +76,12 @@ export function formatResponseBody(rawBody: string, mode: "pretty" | "raw") {
     return rawBody;
   }
 }
+
+export function resolveVariables(text: string, env: Record<string, string>): string {
+  if (!text) return text;
+  // Single pass resolution
+  return text.replace(/{{(.*?)}}/g, (match, key) => {
+    const trimmedKey = key.trim();
+    return env[trimmedKey] !== undefined ? String(env[trimmedKey]) : match;
+  });
+}

@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from "react";
 import { Activity, ChevronDown, Plus, Search, Settings, User, Users } from "lucide-react";
-import type { Workspace } from "../types";
+import type { Workspace, Environment } from "../types";
+import { EnvironmentSelector } from "./EnvironmentSelector";
 
 type Props = {
   peersCount: number;
@@ -8,6 +9,10 @@ type Props = {
   activeWorkspaceId: string;
   setActiveWorkspaceId: (id: string) => void;
   onCreateWorkspace: () => void;
+  environments: Environment[];
+  activeEnvId: string | null;
+  onSetActiveEnv: (id: string | null) => void;
+  onOpenEnvManager: () => void;
 };
 
 export function TopBar({ 
@@ -15,7 +20,11 @@ export function TopBar({
   workspaces, 
   activeWorkspaceId, 
   setActiveWorkspaceId,
-  onCreateWorkspace
+  onCreateWorkspace,
+  environments,
+  activeEnvId,
+  onSetActiveEnv,
+  onOpenEnvManager
 }: Props) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -128,6 +137,15 @@ export function TopBar({
         >
           <Plus size={16} />
         </button>
+
+        <div className="h-6 w-px bg-border/50 mx-2" />
+
+        <EnvironmentSelector 
+          environments={environments}
+          activeEnvId={activeEnvId}
+          onSetActiveEnv={onSetActiveEnv}
+          onOpenManager={onOpenEnvManager}
+        />
       </div>
 
       <div className="flex-1 max-w-2xl px-12">

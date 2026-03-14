@@ -21,6 +21,7 @@ import type {
   SyncEvent,
   Workspace,
   WorkspaceTab,
+  Environment,
 } from "./types";
 import {
   defaultHeaders,
@@ -28,7 +29,9 @@ import {
   generateId,
   headerRowsToObject,
   parseHeadersToRows,
+  resolveVariables,
 } from "./utils";
+import { EnvironmentManager } from "./components/EnvironmentManager";
 import { v4 as uuidv4 } from "uuid";
 import "./App.css";
 
@@ -53,6 +56,10 @@ function App() {
 
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("Headers");
   const [respTab, setRespTab] = useState<ResponseTab>("Body");
+
+  const [environments, setEnvironments] = useState<Environment[]>([]);
+  const [activeEnvId, setActiveEnvId] = useState<string | null>(null);
+  const [isEnvManagerOpen, setIsEnvManagerOpen] = useState(false);
 
   const [peers, setPeers] = useState<Record<string, string>>({});
   const [connectedPeerIps, setConnectedPeerIps] = useState<Record<string, boolean>>({});
@@ -168,6 +175,23 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (activeWorkspaceId) {
+      void fetchEnvironments(activeWorkspaceId);
+    }
+  }, [activeWorkspaceId]);
+
+  async function fetchEnvironments(workspaceId: string) {
+    try {
+      const data = await invoke<Environment[]>("get_environments", { workspaceId });
+      setEnvironments(data);
+      const active = data.find(e => e.is_active);
+      if (active) setActiveEnvId(active.id);
+    } catch (error) {
+      console.error("Failed to fetch environments:", error);
+    }
+  }
+
+  useEffect(() => {
     if (!activeCollectionId) {
       setActiveRequestId(null);
       return;
@@ -207,6 +231,12 @@ function App() {
       if (isMod && e.key === "n") {
         e.preventDefault();
         handleCreateRequestClick();
+      }
+
+      // Ctrl/Cmd + Shift + E: Toggle Environments
+      if (isMod && e.shiftKey && e.key === "E") {
+        e.preventDefault();
+        setIsEnvManagerOpen(true);
       }
 
       // Ctrl/Cmd + K: Focus Search
@@ -1555,16 +1585,32 @@ function App() {
     setReqResponse(null);
     setRespTab("Body");
 
-    const headers = headerRowsToObject(reqHeaders);
+    // Resolve Environments
+    const activeEnv = environments.find(e => e.id === activeEnvId);
+    let envData: Record<string, string> = {};
+    if (activeEnv) {
+      try {
+        envData = JSON.parse(activeEnv.variables);
+      } catch (err) {
+        console.error("Failed to parse environment variables:", err);
+      }
+    }
 
-    let finalUrl = reqUrl.startsWith("http")
-      ? reqUrl
-      : `https://jsonplaceholder.typicode.com${reqUrl.startsWith("/") ? reqUrl : `/${reqUrl}`}`;
+    const headers = headerRowsToObject(reqHeaders);
+    const resolvedHeaders: Record<string, string> = {};
+    Object.entries(headers).forEach(([k, v]) => {
+      resolvedHeaders[k] = resolveVariables(v, envData);
+    });
+
+    let finalUrl = resolveVariables(reqUrl, envData);
+    if (!finalUrl.startsWith("http")) {
+      finalUrl = `https://jsonplaceholder.typicode.com${finalUrl.startsWith("/") ? finalUrl : `/${finalUrl}`}`;
+    }
 
     const queryParams = new URLSearchParams();
     reqParams.forEach((param) => {
       if (param.enabled && param.key.trim()) {
-        queryParams.append(param.key.trim(), param.value);
+        queryParams.append(param.key.trim(), resolveVariables(param.value, envData));
       }
     });
 
@@ -1573,13 +1619,15 @@ function App() {
       finalUrl += finalUrl.includes("?") ? `&${queryString}` : `?${queryString}`;
     }
 
+    const resolvedBody = reqBody ? resolveVariables(reqBody, envData) : null;
+
     try {
       const response = await invoke<HttpResponseResult>("execute_request", {
         params: {
           method: reqMethod,
           url: finalUrl,
-          headers: Object.keys(headers).length > 0 ? headers : null,
-          body: reqMethod === "GET" ? null : reqBody,
+          headers: Object.keys(resolvedHeaders).length > 0 ? resolvedHeaders : null,
+          body: reqMethod === "GET" ? null : resolvedBody,
         },
       });
       setReqResponse(response);
@@ -1655,6 +1703,58 @@ function App() {
     }
   }
 
+  async function handleCreateEnvironment(name: string, variables: string = "{}", collectionId: string | null = null) {
+    if (!activeWorkspaceId) return;
+    try {
+      const newEnv = await invoke<Environment>("create_environment", {
+        id: uuidv4(),
+        workspaceId: activeWorkspaceId,
+        workspace_id: activeWorkspaceId,
+        collectionId,
+        collection_id: collectionId,
+        name,
+        variables
+      });
+      setEnvironments(prev => [...prev, newEnv]);
+      return newEnv;
+    } catch (err) {
+      console.error("Failed to create environment:", err);
+      showToast({ kind: "error", title: "Error creating environment", description: String(err) });
+    }
+  }
+
+  async function handleUpdateEnvironment(id: string, name: string, variables: string) {
+    try {
+      const updated = await invoke<Environment>("update_environment", { id, name, variables });
+      setEnvironments(prev => prev.map(e => e.id === updated.id ? updated : e));
+    } catch (err) {
+      console.error("Failed to update environment:", err);
+      showToast({ kind: "error", title: "Error updating environment", description: String(err) });
+    }
+  }
+
+  async function handleDeleteEnvironment(id: string) {
+    try {
+      await invoke("delete_environment", { id });
+      setEnvironments(prev => prev.filter(e => e.id !== id));
+      if (activeEnvId === id) setActiveEnvId(null);
+    } catch (err) {
+      console.error("Failed to delete environment:", err);
+      showToast({ kind: "error", title: "Error deleting environment", description: String(err) });
+    }
+  }
+
+  async function handleSetActiveEnvironment(id: string | null) {
+    if (!activeWorkspaceId) return;
+    try {
+      await invoke("set_active_environment", { id, workspaceId: activeWorkspaceId, workspace_id: activeWorkspaceId });
+      setActiveEnvId(id);
+      setEnvironments(prev => prev.map(e => ({ ...e, is_active: e.id === id })));
+    } catch (err) {
+      console.error("Failed to set active environment:", err);
+    }
+  }
+
   const peersCount = Object.keys(peers).length;
 
   return (
@@ -1665,6 +1765,10 @@ function App() {
         activeWorkspaceId={activeWorkspaceId}
         setActiveWorkspaceId={setActiveWorkspaceId}
         onCreateWorkspace={handleCreateWorkspace}
+        environments={environments}
+        activeEnvId={activeEnvId}
+        onSetActiveEnv={handleSetActiveEnvironment}
+        onOpenEnvManager={() => setIsEnvManagerOpen(true)}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -1802,6 +1906,8 @@ function App() {
             onSendRequest={() => {
               void handleSendRequest();
             }}
+            environments={environments}
+            activeEnvId={activeEnvId}
           />
 
           <ResponsePanel
@@ -1848,6 +1954,15 @@ function App() {
           isDestructive={dialogState.isDestructive}
         />
       )}
+
+      <EnvironmentManager 
+        isOpen={isEnvManagerOpen}
+        onClose={() => setIsEnvManagerOpen(false)}
+        environments={environments}
+        onCreate={(name) => handleCreateEnvironment(name)}
+        onUpdate={handleUpdateEnvironment}
+        onDelete={handleDeleteEnvironment}
+      />
     </div>
   );
 }

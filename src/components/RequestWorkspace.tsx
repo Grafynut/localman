@@ -9,8 +9,9 @@ import {
 import { useState, useRef, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { KeyValueEditor } from "./KeyValueEditor";
-import type { KeyValuePair, WorkspaceTab } from "../types";
 import { methodColor } from "../utils";
+import { VariableInput } from "./VariableInput";
+import type { KeyValuePair, WorkspaceTab, Environment } from "../types";
 
 type Props = {
   activeCollectionName: string;
@@ -34,6 +35,8 @@ type Props = {
   setActiveWorkspaceTab: Dispatch<SetStateAction<WorkspaceTab>>;
   isSending: boolean;
   onSendRequest: () => void;
+  environments: Environment[];
+  activeEnvId: string | null;
 };
 
 export function RequestWorkspace({
@@ -58,6 +61,8 @@ export function RequestWorkspace({
   setActiveWorkspaceTab,
   isSending,
   onSendRequest,
+  environments,
+  activeEnvId,
 }: Props) {
   const [isMethodOpen, setIsMethodOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -151,17 +156,14 @@ export function RequestWorkspace({
             )}
           </div>
 
-          <input
-            type="text"
+           <VariableInput
             value={reqUrl}
-            onChange={(e) => setReqUrl(e.target.value)}
+            onChange={setReqUrl}
             placeholder="https://api.example.com/v1/resource"
             className="flex-1 bg-transparent px-5 py-2.5 text-gray-100 placeholder-muted/50 focus:outline-none text-[15px] font-medium"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                onSendRequest();
-              }
-            }}
+            environments={environments}
+            activeEnvId={activeEnvId}
+            onEnter={onSendRequest}
           />
 
           <button
@@ -208,10 +210,20 @@ export function RequestWorkspace({
 
           <div className="flex-1 overflow-hidden relative bg-background">
             {activeWorkspaceTab === "Headers" && (
-              <KeyValueEditor items={reqHeaders} setItems={setReqHeaders} />
+              <KeyValueEditor 
+                items={reqHeaders} 
+                setItems={setReqHeaders} 
+                environments={environments}
+                activeEnvId={activeEnvId}
+              />
             )}
             {activeWorkspaceTab === "Params" && (
-              <KeyValueEditor items={reqParams} setItems={setReqParams} />
+              <KeyValueEditor 
+                items={reqParams} 
+                setItems={setReqParams} 
+                environments={environments}
+                activeEnvId={activeEnvId}
+              />
             )}
 
             {activeWorkspaceTab === "Body" && (
@@ -245,9 +257,12 @@ export function RequestWorkspace({
                         return <span key={i} className="text-gray-200">{token}</span>;
                       })}
                     </div>
-                    <textarea
+                    <VariableInput
                       value={reqBody}
-                      onChange={(e) => setReqBody(e.target.value)}
+                      onChange={setReqBody}
+                      type="textarea"
+                      environments={environments}
+                      activeEnvId={activeEnvId}
                       onScroll={(e) => {
                         const target = e.currentTarget;
                         const highlight = document.getElementById("req-body-highlight");
@@ -257,7 +272,6 @@ export function RequestWorkspace({
                         }
                       }}
                       className="w-full h-full bg-transparent p-4 text-[14px] font-mono text-transparent caret-white focus:outline-none resize-none leading-[21px] selection:bg-primary/20 relative z-10 whitespace-pre overflow-auto scrollbar-hide"
-                      spellCheck={false}
                     />
                   </div>
                 </div>

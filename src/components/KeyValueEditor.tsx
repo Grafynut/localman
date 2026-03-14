@@ -1,14 +1,17 @@
 import { Trash } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
-import type { KeyValuePair } from "../types";
+import type { KeyValuePair, Environment } from "../types";
 import { emptyKeyValueRow } from "../utils";
+import { VariableInput } from "./VariableInput";
 
 type Props = {
   items: KeyValuePair[];
   setItems: Dispatch<SetStateAction<KeyValuePair[]>>;
+  environments: Environment[];
+  activeEnvId: string | null;
 };
 
-export function KeyValueEditor({ items, setItems }: Props) {
+export function KeyValueEditor({ items, setItems, environments, activeEnvId }: Props) {
   const updateItem = (
     index: number,
     field: keyof KeyValuePair,
@@ -71,20 +74,22 @@ export function KeyValueEditor({ items, setItems }: Props) {
                 />
               </td>
               <td className="border-r border-border align-middle p-0">
-                <input
+                <VariableInput
                   value={item.value}
-                  onChange={(e) => updateItem(index, "value", e.target.value)}
+                  onChange={(val) => updateItem(index, "value", val)}
                   placeholder="Value"
+                  environments={environments}
+                  activeEnvId={activeEnvId}
                   className="w-full bg-transparent px-4 py-3 text-[13px] text-primary/90 placeholder-muted/30 focus:outline-none focus:bg-primary/5 font-mono selection:bg-primary/30 transition-all"
                 />
               </td>
               <td className="border-r border-border align-middle p-0">
-                <input
+                <VariableInput
                   value={item.description || ""}
-                  onChange={(e) =>
-                    updateItem(index, "description", e.target.value)
-                  }
+                  onChange={(val) => updateItem(index, "description", val)}
                   placeholder="Description"
+                  environments={environments}
+                  activeEnvId={activeEnvId}
                   className="w-full bg-transparent px-4 py-3 text-[13px] text-muted placeholder-muted/20 focus:outline-none focus:bg-primary/5 transition-all italic"
                 />
               </td>

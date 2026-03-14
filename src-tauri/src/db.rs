@@ -81,6 +81,17 @@ pub fn init_db(
             FOREIGN KEY(user_id) REFERENCES users(id),
             FOREIGN KEY(collection_id) REFERENCES collections(id)
         );
+        CREATE TABLE IF NOT EXISTS environments (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT,
+            collection_id TEXT,
+            name TEXT NOT NULL,
+            variables TEXT NOT NULL,
+            is_active INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+            FOREIGN KEY(collection_id) REFERENCES collections(id)
+        );
         "
     )?;
     
@@ -91,6 +102,17 @@ pub fn init_db(
     let _ = conn.execute("ALTER TABLE requests ADD COLUMN folder_id TEXT", []);
     let _ = conn.execute("ALTER TABLE requests ADD COLUMN position INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE requests ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP", []);
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS environments (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT,
+        collection_id TEXT,
+        name TEXT NOT NULL,
+        variables TEXT NOT NULL,
+        is_active INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+        FOREIGN KEY(collection_id) REFERENCES collections(id)
+    )", []);
 
     Ok(conn)
 }
@@ -134,6 +156,17 @@ pub struct StoredRequest {
     pub headers: Option<String>,
     pub body: Option<String>,
     pub position: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Environment {
+    pub id: String,
+    pub workspace_id: Option<String>,
+    pub collection_id: Option<String>,
+    pub name: String,
+    pub variables: String,
+    pub is_active: bool,
+    pub created_at: String,
 }
 
 fn fetch_collection_by_id(conn: &Connection, id: &str) -> std::result::Result<Collection, String> {
@@ -815,4 +848,158 @@ pub fn get_requests_by_collection(
 #[tauri::command]
 pub fn health_check() -> String {
     "DevCollab Core Engine is running!".to_string()
+}
+
+#[tauri::command]
+pub fn get_environments(
+    state: tauri::State<'_, AppState>,
+    workspace_id: String,
+) -> std::result::Result<Vec<Environment>, String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        let mut stmt = conn
+            .prepare("SELECT id, workspace_id, collection_id, name, variables, is_active, created_at FROM environments WHERE workspace_id = ?1 OR workspace_id IS NULL")
+            .map_err(|e| e.to_string())?;
+        let env_iter = stmt
+            .query_map([&workspace_id], |row| {
+                Ok(Environment {
+                    id: row.get(0).unwrap_or_default(),
+                    workspace_id: row.get(1).ok(),
+                    collection_id: row.get(2).ok(),
+                    name: row.get(3).unwrap_or_default(),
+                    variables: row.get(4).unwrap_or_default(),
+                    is_active: row.get::<_, i32>(5).unwrap_or(0) == 1,
+                    created_at: row.get(6).unwrap_or_default(),
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut environments = Vec::new();
+        for env_result in env_iter {
+            if let Ok(e) = env_result {
+                environments.push(e);
+            }
+        }
+        Ok(environments)
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn create_environment(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    workspace_id: Option<String>,
+    collection_id: Option<String>,
+    name: String,
+    variables: String,
+) -> std::result::Result<Environment, String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        conn.execute(
+            "INSERT INTO environments (id, workspace_id, collection_id, name, variables) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (&id, &workspace_id, &collection_id, &name, &variables),
+        )
+        .map_err(|e| e.to_string())?;
+        
+        let mut stmt = conn
+            .prepare("SELECT id, workspace_id, collection_id, name, variables, is_active, created_at FROM environments WHERE id = ?1")
+            .map_err(|e| e.to_string())?;
+        let mut rows = stmt.query([&id]).map_err(|e| e.to_string())?;
+        if let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            Ok(Environment {
+                id: row.get(0).unwrap_or_default(),
+                workspace_id: row.get(1).ok(),
+                collection_id: row.get(2).ok(),
+                name: row.get(3).unwrap_or_default(),
+                variables: row.get(4).unwrap_or_default(),
+                is_active: row.get::<_, i32>(5).unwrap_or(0) == 1,
+                created_at: row.get(6).unwrap_or_default(),
+            })
+        } else {
+            Err("Environment created but could not be fetched".to_string())
+        }
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn update_environment(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    name: String,
+    variables: String,
+) -> std::result::Result<Environment, String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        conn.execute(
+            "UPDATE environments SET name = ?2, variables = ?3 WHERE id = ?1",
+            (&id, &name, &variables),
+        )
+        .map_err(|e| e.to_string())?;
+        
+        let mut stmt = conn
+            .prepare("SELECT id, workspace_id, collection_id, name, variables, is_active, created_at FROM environments WHERE id = ?1")
+            .map_err(|e| e.to_string())?;
+        let mut rows = stmt.query([&id]).map_err(|e| e.to_string())?;
+        if let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            Ok(Environment {
+                id: row.get(0).unwrap_or_default(),
+                workspace_id: row.get(1).ok(),
+                collection_id: row.get(2).ok(),
+                name: row.get(3).unwrap_or_default(),
+                variables: row.get(4).unwrap_or_default(),
+                is_active: row.get::<_, i32>(5).unwrap_or(0) == 1,
+                created_at: row.get(6).unwrap_or_default(),
+            })
+        } else {
+            Err("Environment updated but could not be fetched".to_string())
+        }
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn delete_environment(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> std::result::Result<(), String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        conn.execute("DELETE FROM environments WHERE id = ?1", [&id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn set_active_environment(
+    state: tauri::State<'_, AppState>,
+    id: Option<String>,
+    workspace_id: String,
+) -> std::result::Result<(), String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        // Reset all for this workspace
+        conn.execute(
+            "UPDATE environments SET is_active = 0 WHERE workspace_id = ?1 OR workspace_id IS NULL",
+            [&workspace_id],
+        ).map_err(|e| e.to_string())?;
+        
+        // Set the active one
+        if let Some(id) = id {
+            conn.execute(
+                "UPDATE environments SET is_active = 1 WHERE id = ?1",
+                [&id],
+            ).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    } else {
+        Err("Database not initialized".to_string())
+    }
 }

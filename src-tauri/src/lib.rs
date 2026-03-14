@@ -55,6 +55,11 @@ pub async fn run() {
             db::delete_request,
             db::duplicate_request,
             db::get_requests_by_collection,
+            db::get_environments,
+            db::create_environment,
+            db::update_environment,
+            db::delete_environment,
+            db::set_active_environment,
             http::execute_request,
             network::get_known_peers
         ])

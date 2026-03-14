@@ -74,3 +74,13 @@ export type SyncEvent = {
   timestamp: string;
   origin_device: string;
 };
+
+export type Environment = {
+  id: string;
+  workspace_id?: string | null;
+  collection_id?: string | null;
+  name: string;
+  variables: string;
+  is_active: boolean;
+  created_at: string;
+};
