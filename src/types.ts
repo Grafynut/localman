@@ -1,5 +1,21 @@
+export type Workspace = {
+  id: string;
+  name: string;
+  owner_id: string;
+  created_at: string;
+};
+
+export type Folder = {
+  id: string;
+  collection_id: string;
+  name: string;
+  position: number;
+  created_at: string;
+};
+
 export type Collection = {
   id: string;
+  workspace_id: string;
   name: string;
   owner_id: string;
   created_at: string;
@@ -8,11 +24,13 @@ export type Collection = {
 export type StoredRequest = {
   id: string;
   collection_id: string;
+  folder_id?: string | null;
   name: string;
   method: string;
   url: string;
   headers?: string | null;
   body?: string | null;
+  position: number;
 };
 
 export type KeyValuePair = {

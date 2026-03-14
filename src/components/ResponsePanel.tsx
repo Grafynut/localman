@@ -40,6 +40,26 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab }: P
     return formatResponseBody(reqResponse.body || "", viewMode);
   }, [reqResponse, viewMode]);
 
+  const highlightJson = (json: string) => {
+    if (!json || viewMode === "raw") return <span className="text-gray-200">{json}</span>;
+    
+    // Simple but effective regex-based syntax highlighter for JSON
+    const tokens = json.split(/(".*?"|[:{}\[\]\s,]+|\d+|true|false|null)/g);
+    
+    return tokens.map((token, i) => {
+      if (/^".*"$/.test(token)) {
+        if (tokens[i + 1]?.includes(":")) {
+          return <span key={i} className="text-[#9CDCFE]">{token}</span>; // Key
+        }
+        return <span key={i} className="text-[#CE9178]">{token}</span>; // String value
+      }
+      if (/^\d+$/.test(token)) return <span key={i} className="text-[#B5CEA8]">{token}</span>; // Number
+      if (/^(true|false|null)$/.test(token)) return <span key={i} className="text-[#569CD6] font-bold">{token}</span>; // Keywords
+      if (/^[:{}\[\]\s,]+$/.test(token)) return <span key={i} className="text-gray-400">{token}</span>; // Punctuation
+      return <span key={i} className="text-gray-200">{token}</span>;
+    });
+  };
+
   const headers = useMemo(() => {
     if (!reqResponse) {
       return [];
@@ -48,35 +68,35 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab }: P
   }, [reqResponse]);
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-[#1e1e1e] relative">
-      <div className="flex items-center justify-between px-4 py-2 bg-surface/40 border-b border-border shrink-0">
-        <span className="text-[13px] font-bold text-gray-200">Response Panel</span>
+    <div className="flex-1 flex flex-col min-h-0 bg-background relative border-t border-border/50">
+      <div className="flex items-center justify-between px-6 py-3 bg-surface/20 border-b border-border shrink-0">
+        <span className="text-[11px] font-bold uppercase tracking-widest text-muted">Response</span>
         {reqResponse && (
-          <div className="flex items-center space-x-6 pr-2 text-[12px] font-mono">
-            <div className="flex items-center space-x-1.5">
-              <span className="text-muted">Status</span>
-              <span className={`${reqResponse.status >= 200 && reqResponse.status < 300 ? "text-green-500" : "text-red-400"} font-bold`}>
+          <div className="flex items-center space-x-6 text-[12px] font-bold">
+            <div className="flex items-center space-x-2">
+              <span className="text-muted font-medium">Status</span>
+              <span className={`${reqResponse.status >= 200 && reqResponse.status < 300 ? "text-method-get" : "text-method-delete"}`}>
                 {reqResponse.status} {statusText}
               </span>
             </div>
-            <div className="flex items-center space-x-1.5">
-              <span className="text-muted">Time</span>
-              <span className="text-gray-300 font-bold">{reqResponse.time_ms || 0}ms</span>
+            <div className="flex items-center space-x-2">
+              <span className="text-muted font-medium">Time</span>
+              <span className="text-gray-200">{reqResponse.time_ms || 0} ms</span>
             </div>
-            <div className="flex items-center space-x-1.5">
-              <span className="text-muted">Size</span>
-              <span className="text-gray-300 font-bold">{((reqResponse.body?.length || 0) / 1000).toFixed(2)} KB</span>
+            <div className="flex items-center space-x-2">
+              <span className="text-muted font-medium">Size</span>
+              <span className="text-gray-200">{((reqResponse.body?.length || 0) / 1024).toFixed(2)} KB</span>
             </div>
           </div>
         )}
       </div>
 
-      <div className="flex border-b border-border px-2 shrink-0 bg-[#1e1e1e]">
+      <div className="flex border-b border-border px-4 shrink-0 bg-surface/10">
         {(["Body", "Headers", "Tests"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setRespTab(tab)}
-            className={`px-4 py-2 text-[13px] font-medium transition-all duration-200 relative ${respTab === tab ? "text-primary" : "text-muted hover:text-gray-300"}`}
+            className={`px-4 py-3 text-[11px] font-bold uppercase tracking-wider transition-all relative ${respTab === tab ? "text-primary" : "text-muted hover:text-gray-300"}`}
           >
             {tab === "Body" ? (
               <span className="flex items-center space-x-1">
@@ -87,28 +107,28 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab }: P
                       e.stopPropagation();
                       setViewMenuOpen((prev) => !prev);
                     }}
-                    className="px-1.5 py-0.5 rounded bg-surface border border-border text-xs text-gray-300 flex items-center space-x-1"
+                    className="px-2 py-0.5 rounded bg-surface border border-border text-[10px] font-bold text-muted hover:text-gray-100 flex items-center space-x-1 transition-colors"
                   >
-                    <span>{viewMode === "pretty" ? "Pretty JSON Viewer" : "Raw Viewer"}</span>
-                    <ChevronDown size={12} className={`transition-transform ${viewMenuOpen ? "rotate-180" : ""}`} />
+                    <span>{viewMode === "pretty" ? "Pretty" : "Raw"}</span>
+                    <ChevronDown size={10} className={`transition-transform ${viewMenuOpen ? "rotate-180" : ""}`} />
                   </button>
                   {viewMenuOpen && (
-                    <div className="absolute left-0 top-7 w-[160px] rounded border border-border bg-surface text-[12px] z-20">
+                    <div className="absolute left-0 top-8 w-[140px] rounded-md border border-border bg-background shadow-2xl py-1 z-30 overflow-hidden">
                       <button
                         onClick={() => {
                           setViewMode("pretty");
                           setViewMenuOpen(false);
                         }}
-                        className={`w-full text-left px-2 py-1.5 hover:bg-white/5 ${viewMode === "pretty" ? "text-primary" : "text-gray-300"}`}
+                        className={`w-full text-left px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider hover:bg-surface-hover transition-colors ${viewMode === "pretty" ? "text-primary" : "text-gray-400"}`}
                       >
-                        Pretty JSON
+                        Pretty
                       </button>
                       <button
                         onClick={() => {
                           setViewMode("raw");
                           setViewMenuOpen(false);
                         }}
-                        className={`w-full text-left px-2 py-1.5 hover:bg-white/5 ${viewMode === "raw" ? "text-primary" : "text-gray-300"}`}
+                        className={`w-full text-left px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider hover:bg-surface-hover transition-colors ${viewMode === "raw" ? "text-primary" : "text-gray-400"}`}
                       >
                         Raw
                       </button>
@@ -117,7 +137,7 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab }: P
                 </span>
               </span>
             ) : tab}
-            {respTab === tab && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary"></div>}
+            {respTab === tab && <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-t-full"></div>}
           </button>
         ))}
       </div>
@@ -138,13 +158,19 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab }: P
         )}
 
         {reqResponse && respTab === "Body" && (
-          <div className="w-full h-full relative">
-            <div className="absolute left-0 top-0 bottom-0 w-12 bg-surface/10 border-r border-border text-right py-4 px-3 text-[13px] text-muted font-mono select-none">
-              {body.split("\n").map((_, i) => <div key={i} className="mb-[2px] opacity-70 leading-[21px]">{i + 1}</div>)}
+          <div className="w-full h-full relative overflow-hidden flex bg-background">
+            <div className="shrink-0 w-12 bg-surface/5 border-r border-border text-right py-4 px-3 text-[12px] text-muted/30 font-mono select-none">
+              {body.split("\n").map((_, i) => (
+                <div key={i} className="h-[21px] leading-[21px]">
+                  {i + 1}
+                </div>
+              ))}
             </div>
-            <pre className="w-full h-full bg-transparent p-4 pl-16 text-[14px] font-mono text-[#9cdcfe] whitespace-pre-wrap word-break-all leading-[21px] focus:outline-none">
-              {"error" in reqResponse ? <span className="text-red-400">{body}</span> : body}
-            </pre>
+            <div className="flex-1 overflow-auto custom-scrollbar">
+              <pre className="inline-block p-4 text-[14px] font-mono whitespace-pre leading-[21px] focus:outline-none selection:bg-primary/20">
+                {"error" in reqResponse ? <span className="text-method-delete">{body}</span> : highlightJson(body)}
+              </pre>
+            </div>
           </div>
         )}
 

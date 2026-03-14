@@ -36,6 +36,12 @@ pub async fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             db::health_check,
+            db::get_workspaces,
+            db::create_workspace,
+            db::create_folder,
+            db::get_folders,
+            db::update_folder_location,
+            db::update_request_location,
             db::create_collection,
             db::get_collections,
             db::upsert_collection,

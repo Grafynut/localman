@@ -19,17 +19,17 @@ export function defaultHeaders(): KeyValuePair[] {
 export function methodColor(method: string) {
   switch (method.toUpperCase()) {
     case "GET":
-      return "text-green-400";
+      return "text-method-get";
     case "POST":
-      return "text-yellow-400";
+      return "text-method-post";
     case "PUT":
-      return "text-blue-400";
+      return "text-method-put";
     case "DELETE":
-      return "text-red-400";
+      return "text-method-delete";
     case "PATCH":
-      return "text-purple-400";
+      return "text-method-patch";
     default:
-      return "text-gray-300";
+      return "text-muted";
   }
 }
 

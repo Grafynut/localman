@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { CollectionsSidebar } from "./components/CollectionsSidebar";
+import { Dialog, PromptDialog, ConfirmDialog } from "./components/Dialog";
 import { RequestWorkspace } from "./components/RequestWorkspace";
 import { ResponsePanel } from "./components/ResponsePanel";
 import { RightInspector } from "./components/RightInspector";
@@ -9,6 +10,7 @@ import { TopBar } from "./components/TopBar";
 import { ToastViewport, type ToastMessage } from "./components/ToastViewport";
 import type {
   Collection,
+  Folder,
   HttpResponseResult,
   KeyValuePair,
   ResponseState,
@@ -17,6 +19,7 @@ import type {
   SyncAction,
   SyncEntityType,
   SyncEvent,
+  Workspace,
   WorkspaceTab,
 } from "./types";
 import {
@@ -26,6 +29,7 @@ import {
   headerRowsToObject,
   parseHeadersToRows,
 } from "./utils";
+import { v4 as uuidv4 } from "uuid";
 import "./App.css";
 
 function App() {
@@ -33,9 +37,13 @@ function App() {
   const INTERNAL_CLIPBOARD_KEY = "devcollab.internalClipboard";
   const DEVICE_ID_KEY = "devcollab.deviceId";
 
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>("default_workspace");
+  const [foldersByCollection, setFoldersByCollection] = useState<Record<string, Folder[]>>({});
   const [collections, setCollections] = useState<Collection[]>([]);
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
   const [expandedCollections, setExpandedCollections] = useState<Record<string, boolean>>({});
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [requestsByCollection, setRequestsByCollection] = useState<Record<string, StoredRequest[]>>({});
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
 
@@ -58,11 +66,29 @@ function App() {
 
   const [reqResponse, setReqResponse] = useState<ResponseState>(null);
   const [isSending, setIsSending] = useState(false);
+  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const syncQueueRef = useRef(Promise.resolve());
   const collectionsRef = useRef<Collection[]>([]);
   const activeCollectionIdRef = useRef<string | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
+
+  const [dialogState, setDialogState] = useState<{
+    isOpen: boolean;
+    type: "prompt" | "confirm";
+    title: string;
+    description?: string;
+    defaultValue?: string;
+    placeholder?: string;
+    confirmLabel?: string;
+    isDestructive?: boolean;
+    onConfirm: (val: string) => void;
+  }>({
+    isOpen: false,
+    type: "prompt",
+    title: "",
+    onConfirm: () => {},
+  });
 
   const localDeviceId = useMemo(() => {
     try {
@@ -94,6 +120,21 @@ function App() {
     () => activeRequests.find((request) => request.id === activeRequestId) ?? null,
     [activeRequests, activeRequestId],
   );
+
+  const isDirty = useMemo(() => {
+    if (!activeRequest) return false;
+
+    const currentHeadersObj = headerRowsToObject(reqHeaders);
+    const savedHeadersObj = activeRequest.headers ? JSON.parse(activeRequest.headers) : {};
+
+    return (
+      reqMethod !== activeRequest.method ||
+      reqUrl !== activeRequest.url ||
+      reqBody !== (activeRequest.body || "") ||
+      JSON.stringify(currentHeadersObj) !== JSON.stringify(savedHeadersObj)
+    );
+  }, [activeRequest, reqMethod, reqUrl, reqBody, reqHeaders]);
+
   const workspaceOptions = useMemo(
     () => Array.from(new Set(collections.map((collection) => collection.name))).filter(Boolean),
     [collections],
@@ -147,6 +188,46 @@ function App() {
   }, [collections]);
 
   useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMod = e.ctrlKey || e.metaKey;
+
+      // Ctrl/Cmd + S: Save
+      if (isMod && e.key === "s") {
+        e.preventDefault();
+        handleSaveRequest();
+      }
+
+      // Ctrl/Cmd + Enter: Send
+      if (isMod && e.key === "Enter") {
+        e.preventDefault();
+        handleSendRequest();
+      }
+
+      // Ctrl/Cmd + N: New Request
+      if (isMod && e.key === "n") {
+        e.preventDefault();
+        handleCreateRequestClick();
+      }
+
+      // Ctrl/Cmd + K: Focus Search
+      if (isMod && e.key === "k") {
+        e.preventDefault();
+        const searchInput = document.getElementById("global-search-input");
+        searchInput?.focus();
+      }
+
+      // Ctrl/Cmd + \: Toggle Sidebar
+      if (isMod && e.key === "\\") {
+        e.preventDefault();
+        setIsSidebarVisible((prev) => !prev);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleSaveRequest, handleSendRequest, handleCreateRequestClick]);
+
+  useEffect(() => {
     let unlisten: (() => void) | null = null;
 
     const setup = async () => {
@@ -183,13 +264,17 @@ function App() {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }
 
-  function showToast(toast: Omit<ToastMessage, "id">) {
+  function toggleFolderExpanded(id: string) {
+    setExpandedFolders((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  const showToast = useCallback((toast: Omit<ToastMessage, "id">) => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     setToasts((prev) => [...prev, { id, ...toast }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((item) => item.id !== id));
     }, 3800);
-  }
+  }, []);
 
   function connectedPeerList() {
     return Object.entries(connectedPeerIps)
@@ -340,6 +425,8 @@ function App() {
           : LOCAL_USER_ID;
       const upserted = await invoke<Collection>("upsert_collection", {
         id: event.entity_id,
+        workspaceId: activeWorkspaceId,
+        workspace_id: activeWorkspaceId,
         name,
         ownerId,
         owner_id: ownerId,
@@ -486,10 +573,17 @@ function App() {
       return payload;
     }
 
-    const manual = window.prompt(
-      `${label}\nClipboard read is blocked here. Paste JSON manually:`,
-      "",
-    );
+    const manual = await new Promise<string | null>((resolve) => {
+      openPrompt({
+        title: label,
+        description: "Clipboard read is blocked here. Paste JSON manually:",
+        confirmLabel: "Paste",
+        onConfirm: (val) => resolve(val)
+      });
+      // Handle cancellation somehow? Maybe adding an onClose to openPrompt.
+      // For now, let's keep it simple as the user might not cancel this specific fallback.
+    });
+
     if (manual && manual.trim()) {
       writeInternalClipboard(manual);
       return { text: manual, source: "manual" as const };
@@ -629,6 +723,79 @@ function App() {
     }
   }
 
+  // Fetch workspaces on mount
+  useEffect(() => {
+    const loadWorkspaces = async () => {
+      try {
+        const ws = await invoke<Workspace[]>("get_workspaces", { ownerId: "local_user_1" });
+        setWorkspaces(ws);
+        if (ws.length > 0 && !ws.find(w => w.id === activeWorkspaceId)) {
+          setActiveWorkspaceId(ws[0].id);
+        }
+      } catch (err) {
+        console.error("Failed to load workspaces:", err);
+      }
+    };
+    loadWorkspaces();
+  }, []);
+
+  async function handleCreateWorkspace() {
+    openPrompt({
+      title: "New Workspace",
+      description: "Enter a name for your new workspace.",
+      placeholder: "e.g., Personal Projects",
+      confirmLabel: "Create Workspace",
+      onConfirm: async (name) => {
+        if (!name.trim()) return;
+        try {
+          const newWs = await invoke<Workspace>("create_workspace", {
+            id: generateId(),
+            name: name.trim(),
+            ownerId: LOCAL_USER_ID,
+            owner_id: LOCAL_USER_ID,
+          });
+
+          setWorkspaces((prev) => [...prev, newWs]);
+          setActiveWorkspaceId(newWs.id);
+          showToast({
+            kind: "success",
+            title: "Workspace created",
+            description: newWs.name,
+          });
+        } catch (error) {
+          console.error("Failed to create workspace:", error);
+          showToast({
+            kind: "error",
+            title: "Error creating workspace",
+            description: String(error),
+          });
+        }
+      }
+    });
+  }
+
+  const loadWorkspaceData = useCallback(async () => {
+    if (!activeWorkspaceId) return;
+    try {
+      const cols = await invoke<Collection[]>("get_collections", { workspaceId: activeWorkspaceId });
+      setCollections(cols);
+
+      const folderData: Record<string, Folder[]> = {};
+      for (const col of cols) {
+        const folders = await invoke<Folder[]>("get_folders", { collectionId: col.id });
+        folderData[col.id] = folders;
+      }
+      setFoldersByCollection(folderData);
+    } catch (err) {
+      console.error("Failed to load workspace data:", err);
+    }
+  }, [activeWorkspaceId]);
+
+  // Fetch collections and folders when workspace changes
+  useEffect(() => {
+    loadWorkspaceData();
+  }, [loadWorkspaceData]);
+
   async function fetchRequests(collectionId: string) {
     setIsLoadingRequests(true);
     try {
@@ -660,128 +827,259 @@ function App() {
     }
   }
 
-  async function handleCreateCollectionClick() {
-    const name = window.prompt("Enter new collection name:");
-    if (!name || !name.trim()) {
-      return;
-    }
+  const openPrompt = (config: Omit<typeof dialogState, "isOpen" | "type">) => {
+    setDialogState({ ...config, isOpen: true, type: "prompt" });
+  };
 
+  const openConfirm = (config: Omit<typeof dialogState, "isOpen" | "type" | "onConfirm"> & { onConfirm: () => void }) => {
+    setDialogState({ 
+      ...config, 
+      isOpen: true, 
+      type: "confirm", 
+      onConfirm: config.onConfirm 
+    } as any);
+  };
+
+  async function handleMoveRequest(requestId: string, targetCollectionId: string, targetFolderId: string | null, targetPosition: number) {
     try {
-      const newCollection = await invoke<Collection>("create_collection", {
-        id: generateId(),
-        name: name.trim(),
-        ownerId: LOCAL_USER_ID,
-        owner_id: LOCAL_USER_ID,
+      await invoke("update_request_location", {
+        id: requestId,
+        collectionId: targetCollectionId,
+        collection_id: targetCollectionId,
+        folderId: targetFolderId,
+        folder_id: targetFolderId,
+        position: targetPosition
       });
 
-      setCollections((prev) => [...prev, newCollection]);
-      setRequestsByCollection((prev) => ({ ...prev, [newCollection.id]: [] }));
-      setExpandedCollections((prev) => ({ ...prev, [newCollection.id]: true }));
-      setActiveCollectionId(newCollection.id);
-      setActiveRequestId(null);
-      void broadcastSyncEvent("Create", "Collection", newCollection.id, newCollection);
+      // Identify source collection to refresh it as well
+      const sourceCollectionId = Object.entries(requestsByCollection).find(
+        ([_, reqs]) => reqs.some(r => r.id === requestId)
+      )?.[0];
+
+      setRequestsByCollection((prev) => {
+        const next = { ...prev };
+        delete next[targetCollectionId];
+        if (sourceCollectionId) delete next[sourceCollectionId];
+        return next;
+      });
+
+      await fetchRequests(targetCollectionId);
+      if (sourceCollectionId && sourceCollectionId !== targetCollectionId) {
+        await fetchRequests(sourceCollectionId);
+      }
+      
+      void broadcastSyncEvent("Update", "Request", requestId, { 
+        id: requestId, 
+        collection_id: targetCollectionId, 
+        folder_id: targetFolderId, 
+        position: targetPosition 
+      });
+
       showToast({
         kind: "success",
-        title: "Collection created",
-        description: newCollection.name,
+        title: "Request moved",
+        description: "Organization updated successfully."
       });
     } catch (error) {
+      console.error("Move request error:", error);
       showToast({
         kind: "error",
-        title: "Error creating collection",
+        title: "Error moving request",
         description: String(error),
       });
     }
   }
 
-  async function handleRenameCollection(collection: Collection) {
-    const name = window.prompt("Rename collection:", collection.name);
-    if (!name || !name.trim() || name.trim() === collection.name) {
-      return;
-    }
+  async function handleMoveFolder(folderId: string, targetCollectionId: string, targetPosition: number) {
     try {
-      const updated = await invoke<Collection>("rename_collection", {
-        id: collection.id,
-        name: name.trim(),
+      // Identify source collection to refresh it as well
+      const sourceCollectionId = Object.entries(foldersByCollection).find(
+        ([_, folders]) => folders.some(f => f.id === folderId)
+      )?.[0];
+
+      await invoke("update_folder_location", {
+        id: folderId,
+        collectionId: targetCollectionId,
+        collection_id: targetCollectionId,
+        position: targetPosition
       });
-      setCollections((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-      void broadcastSyncEvent("Update", "Collection", updated.id, updated);
-      showToast({ kind: "success", title: "Collection renamed", description: updated.name });
+
+      // Reload folders for target
+      const targetFolders = await invoke<Folder[]>("get_folders", { collectionId: targetCollectionId });
+      setFoldersByCollection(prev => ({
+        ...prev,
+        [targetCollectionId]: targetFolders
+      }));
+
+      // Reload folders for source if different
+      if (sourceCollectionId && sourceCollectionId !== targetCollectionId) {
+        const sourceFolders = await invoke<Folder[]>("get_folders", { collectionId: sourceCollectionId });
+        setFoldersByCollection(prev => ({
+          ...prev,
+          [sourceCollectionId]: sourceFolders
+        }));
+      }
+
+      showToast({
+        kind: "success",
+        title: "Folder moved",
+        description: "Organizational hierarchy updated."
+      });
     } catch (error) {
-      showToast({ kind: "error", title: "Error renaming collection", description: String(error) });
+      console.error("Move folder error:", error);
+      showToast({
+        kind: "error",
+        title: "Error moving folder",
+        description: String(error),
+      });
     }
+  }
+
+  async function handleCreateCollectionClick() {
+    openPrompt({
+      title: "New Collection",
+      description: "Collections help you group related API requests together.",
+      placeholder: "e.g., User API, Authentication",
+      confirmLabel: "Create Collection",
+      onConfirm: async (name) => {
+        if (!name.trim()) return;
+        try {
+          const newCollection = await invoke<Collection>("create_collection", {
+            id: generateId(),
+            workspaceId: activeWorkspaceId,
+            workspace_id: activeWorkspaceId,
+            name: name.trim(),
+            ownerId: LOCAL_USER_ID,
+            owner_id: LOCAL_USER_ID,
+          });
+
+          setCollections((prev) => [...prev, newCollection]);
+          setRequestsByCollection((prev) => ({ ...prev, [newCollection.id]: [] }));
+          setExpandedCollections((prev) => ({ ...prev, [newCollection.id]: true }));
+          setActiveCollectionId(newCollection.id);
+          setActiveRequestId(null);
+          void broadcastSyncEvent("Create", "Collection", newCollection.id, newCollection);
+          showToast({
+            kind: "success",
+            title: "Collection created",
+            description: newCollection.name,
+          });
+        } catch (error) {
+          showToast({
+            kind: "error",
+            title: "Error creating collection",
+            description: String(error),
+          });
+        }
+      }
+    });
+  }
+
+  async function handleRenameCollection(collection: Collection) {
+    openPrompt({
+      title: "Rename Collection",
+      defaultValue: collection.name,
+      confirmLabel: "Rename",
+      onConfirm: async (name) => {
+        if (!name.trim() || name.trim() === collection.name) return;
+        try {
+          const updated = await invoke<Collection>("rename_collection", {
+            id: collection.id,
+            name: name.trim(),
+          });
+          setCollections((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+          void broadcastSyncEvent("Update", "Collection", updated.id, updated);
+          showToast({ kind: "success", title: "Collection renamed", description: updated.name });
+        } catch (error) {
+          showToast({ kind: "error", title: "Error renaming collection", description: String(error) });
+        }
+      }
+    });
   }
 
   async function handleDuplicateCollection(collection: Collection) {
-    const name = window.prompt("Duplicate collection as:", `${collection.name} Copy`);
-    if (!name || !name.trim()) {
-      return;
-    }
-    const newId = generateId();
-    try {
-      const duplicated = await invoke<Collection>("duplicate_collection", {
-        sourceId: collection.id,
-        source_id: collection.id,
-        newId,
-        new_id: newId,
-        newName: name.trim(),
-        new_name: name.trim(),
-      });
-      setCollections((prev) => [...prev, duplicated]);
-      setExpandedCollections((prev) => ({ ...prev, [duplicated.id]: true }));
-      setActiveCollectionId(duplicated.id);
-      setActiveRequestId(null);
-      await fetchRequests(duplicated.id);
-      void broadcastSyncEvent("Create", "Collection", duplicated.id, duplicated);
-      const duplicatedRequests = await invoke<StoredRequest[]>("get_requests_by_collection", {
-        collectionId: duplicated.id,
-        collection_id: duplicated.id,
-      });
-      duplicatedRequests.forEach((request) => {
-        void broadcastSyncEvent("Create", "Request", request.id, request);
-      });
-      showToast({
-        kind: "success",
-        title: "Collection duplicated",
-        description: duplicated.name,
-      });
-    } catch (error) {
-      showToast({ kind: "error", title: "Error duplicating collection", description: String(error) });
-    }
+    openPrompt({
+      title: "Duplicate Collection",
+      description: "A copy of the collection will be created.",
+      defaultValue: `${collection.name} Copy`,
+      confirmLabel: "Duplicate",
+      onConfirm: async (name) => {
+        if (!name.trim()) return;
+        const newId = generateId();
+        try {
+          const duplicated = await invoke<Collection>("duplicate_collection", {
+            sourceId: collection.id,
+            source_id: collection.id,
+            newId,
+            new_id: newId,
+            newName: name.trim(),
+            new_name: name.trim(),
+          });
+          setCollections((prev) => [...prev, duplicated]);
+          setExpandedCollections((prev) => ({ ...prev, [duplicated.id]: true }));
+          setActiveCollectionId(duplicated.id);
+          setActiveRequestId(null);
+          await fetchRequests(duplicated.id);
+          void broadcastSyncEvent("Create", "Collection", duplicated.id, duplicated);
+          const duplicatedRequests = await invoke<StoredRequest[]>("get_requests_by_collection", {
+            collectionId: duplicated.id,
+            collection_id: duplicated.id,
+          });
+          duplicatedRequests.forEach((request) => {
+            void broadcastSyncEvent("Create", "Request", request.id, request);
+          });
+          showToast({
+            kind: "success",
+            title: "Collection duplicated",
+            description: duplicated.name,
+          });
+        } catch (error) {
+          showToast({
+            kind: "error",
+            title: "Error duplicating collection",
+            description: String(error),
+          });
+        }
+      }
+    });
   }
 
   async function handleDeleteCollection(collection: Collection) {
-    const ok = window.confirm(`Delete collection "${collection.name}" and all its requests?`);
-    if (!ok) {
-      return;
-    }
-    try {
-      await invoke("delete_collection", { id: collection.id });
-      const nextCollections = collections.filter((item) => item.id !== collection.id);
-      setCollections(nextCollections);
-      setRequestsByCollection((prev) => {
-        const next = { ...prev };
-        delete next[collection.id];
-        return next;
-      });
-      setExpandedCollections((prev) => {
-        const next = { ...prev };
-        delete next[collection.id];
-        return next;
-      });
+    openConfirm({
+      title: "Delete Collection",
+      description: `Are you sure you want to delete "${collection.name}"? This will permanently remove all requests within it.`,
+      confirmLabel: "Delete",
+      isDestructive: true,
+      onConfirm: async () => {
+        try {
+          await invoke("delete_collection", { id: collection.id });
+          const nextCollections = collections.filter((item) => item.id !== collection.id);
+          setCollections(nextCollections);
+          setRequestsByCollection((prev) => {
+            const next = { ...prev };
+            delete next[collection.id];
+            return next;
+          });
+          setExpandedCollections((prev) => {
+            const next = { ...prev };
+            delete next[collection.id];
+            return next;
+          });
 
-      if (activeCollectionId === collection.id) {
-        const nextActive = nextCollections[0]?.id ?? null;
-        setActiveCollectionId(nextActive);
-        setActiveRequestId(null);
+          if (activeCollectionId === collection.id) {
+            const nextActive = nextCollections[0]?.id ?? null;
+            setActiveCollectionId(nextActive);
+            setActiveRequestId(null);
+          }
+          void broadcastSyncEvent("Delete", "Collection", collection.id, {
+            id: collection.id,
+          });
+          showToast({ kind: "success", title: "Collection deleted", description: collection.name });
+        } catch (error) {
+          showToast({ kind: "error", title: "Error deleting collection", description: String(error) });
+        }
       }
-      void broadcastSyncEvent("Delete", "Collection", collection.id, {
-        id: collection.id,
-      });
-      showToast({ kind: "success", title: "Collection deleted", description: collection.name });
-    } catch (error) {
-      showToast({ kind: "error", title: "Error deleting collection", description: String(error) });
-    }
+    });
   }
 
   async function handleCopyCollection(collection: Collection) {
@@ -846,7 +1144,7 @@ function App() {
     }
   }
 
-  async function handleCreateRequestClick(collectionIdArg?: string) {
+  async function handleCreateRequestClick(collectionIdArg?: string, folderId: string | null = null) {
     const collectionId = collectionIdArg || activeCollectionId;
     if (!collectionId) {
       showToast({
@@ -857,138 +1155,160 @@ function App() {
       return;
     }
 
-    const requestCount = (requestsByCollection[collectionId] || []).length;
-    const name = window.prompt("Enter request name:", `New Request ${requestCount + 1}`);
-    if (!name || !name.trim()) {
-      return;
-    }
+    const requestCount = (requestsByCollection[collectionId] || []).filter(r => r.folder_id === folderId).length;
+    openPrompt({
+      title: "New Request",
+      description: "Create a new API request to start testing your endpoints.",
+      defaultValue: `New Request ${requestCount + 1}`,
+      confirmLabel: "Create Request",
+      onConfirm: async (name) => {
+        if (!name.trim()) return;
+        setIsCreatingRequest(true);
+        try {
+          const headers = headerRowsToObject(reqHeaders);
+          const created = await invoke<StoredRequest>("create_request", {
+            id: uuidv4(),
+            collectionId,
+            collection_id: collectionId,
+            folderId,
+            folder_id: folderId,
+            name: name.trim(),
+            method: reqMethod,
+            url: reqUrl,
+            headers: Object.keys(headers).length > 0 ? JSON.stringify(headers) : null,
+            body: reqBody || null,
+            position: requestCount + 1
+          });
 
-    setIsCreatingRequest(true);
-    try {
-      const headers = headerRowsToObject(reqHeaders);
-      const created = await invoke<StoredRequest>("create_request", {
-        id: generateId(),
-        collectionId,
-        collection_id: collectionId,
-        name: name.trim(),
-        method: reqMethod,
-        url: reqUrl,
-        headers: Object.keys(headers).length > 0 ? JSON.stringify(headers) : null,
-        body: reqBody || null,
-      });
-
-      setRequestsByCollection((prev) => {
-        const current = prev[collectionId] || [];
-        return { ...prev, [collectionId]: [created, ...current] };
-      });
-      setExpandedCollections((prev) => ({ ...prev, [collectionId]: true }));
-      setActiveCollectionId(collectionId);
-      setActiveRequestId(created.id);
-      applyStoredRequest(created);
-      void broadcastSyncEvent("Create", "Request", created.id, created);
-      showToast({
-        kind: "success",
-        title: "Request created",
-        description: `${created.method} ${created.name}`,
-      });
-    } catch (error) {
-      showToast({
-        kind: "error",
-        title: "Error creating request",
-        description: String(error),
-      });
-    } finally {
-      setIsCreatingRequest(false);
-    }
+          setRequestsByCollection((prev) => {
+            const current = prev[collectionId] || [];
+            return { ...prev, [collectionId]: [...current, created] };
+          });
+          setExpandedCollections((prev) => ({ ...prev, [collectionId]: true }));
+          if (folderId) {
+            setExpandedFolders((prev) => ({ ...prev, [folderId]: true }));
+          }
+          setActiveCollectionId(collectionId);
+          setActiveRequestId(created.id);
+          applyStoredRequest(created);
+          void broadcastSyncEvent("Create", "Request", created.id, created);
+          showToast({
+            kind: "success",
+            title: "Request created",
+            description: `${created.method} ${created.name}`,
+          });
+        } catch (error) {
+          showToast({
+            kind: "error",
+            title: "Error creating request",
+            description: String(error),
+          });
+        } finally {
+          setIsCreatingRequest(false);
+        }
+      }
+    });
   }
 
   async function handleRenameRequest(request: StoredRequest) {
-    const name = window.prompt("Rename request:", request.name);
-    if (!name || !name.trim() || name.trim() === request.name) {
-      return;
-    }
-    try {
-      const updated = await invoke<StoredRequest>("rename_request", {
-        id: request.id,
-        name: name.trim(),
-      });
-      setRequestsByCollection((prev) => {
-        const current = prev[updated.collection_id] || [];
-        return {
-          ...prev,
-          [updated.collection_id]: current.map((item) => (item.id === updated.id ? updated : item)),
-        };
-      });
-      if (activeRequestId === updated.id) {
-        setActiveRequestId(updated.id);
+    openPrompt({
+      title: "Rename Request",
+      defaultValue: request.name,
+      confirmLabel: "Rename",
+      onConfirm: async (name) => {
+        if (!name.trim() || name.trim() === request.name) return;
+        try {
+          const updated = await invoke<StoredRequest>("rename_request", {
+            id: request.id,
+            name: name.trim(),
+          });
+          setRequestsByCollection((prev) => {
+            const current = prev[updated.collection_id] || [];
+            return {
+              ...prev,
+              [updated.collection_id]: current.map((item) => (item.id === updated.id ? updated : item)),
+            };
+          });
+          if (activeRequestId === updated.id) {
+            setActiveRequestId(updated.id);
+          }
+          void broadcastSyncEvent("Update", "Request", updated.id, updated);
+          showToast({ kind: "success", title: "Request renamed", description: updated.name });
+        } catch (error) {
+          showToast({ kind: "error", title: "Error renaming request", description: String(error) });
+        }
       }
-      void broadcastSyncEvent("Update", "Request", updated.id, updated);
-      showToast({ kind: "success", title: "Request renamed", description: updated.name });
-    } catch (error) {
-      showToast({ kind: "error", title: "Error renaming request", description: String(error) });
-    }
+    });
   }
 
   async function handleDuplicateRequest(request: StoredRequest) {
-    const name = window.prompt("Duplicate request as:", `${request.name} Copy`);
-    if (!name || !name.trim()) {
-      return;
-    }
-    const newId = generateId();
-    try {
-      const duplicated = await invoke<StoredRequest>("duplicate_request", {
-        sourceId: request.id,
-        source_id: request.id,
-        newId,
-        new_id: newId,
-        newName: name.trim(),
-        new_name: name.trim(),
-      });
-      setRequestsByCollection((prev) => {
-        const current = prev[duplicated.collection_id] || [];
-        return { ...prev, [duplicated.collection_id]: [duplicated, ...current] };
-      });
-      setExpandedCollections((prev) => ({ ...prev, [duplicated.collection_id]: true }));
-      setActiveCollectionId(duplicated.collection_id);
-      setActiveRequestId(duplicated.id);
-      applyStoredRequest(duplicated);
-      void broadcastSyncEvent("Create", "Request", duplicated.id, duplicated);
-      showToast({
-        kind: "success",
-        title: "Request duplicated",
-        description: `${duplicated.method} ${duplicated.name}`,
-      });
-    } catch (error) {
-      showToast({ kind: "error", title: "Error duplicating request", description: String(error) });
-    }
+    openPrompt({
+      title: "Duplicate Request",
+      defaultValue: `${request.name} Copy`,
+      confirmLabel: "Duplicate",
+      onConfirm: async (name) => {
+        if (!name.trim()) return;
+        const newId = generateId();
+        try {
+          const duplicated = await invoke<StoredRequest>("duplicate_request", {
+            sourceId: request.id,
+            source_id: request.id,
+            newId,
+            new_id: newId,
+            newName: name.trim(),
+            new_name: name.trim(),
+          });
+          setRequestsByCollection((prev) => {
+            const current = prev[duplicated.collection_id] || [];
+            return { ...prev, [duplicated.collection_id]: [duplicated, ...current] };
+          });
+          setExpandedCollections((prev) => ({ ...prev, [duplicated.collection_id]: true }));
+          setActiveCollectionId(duplicated.collection_id);
+          setActiveRequestId(duplicated.id);
+          applyStoredRequest(duplicated);
+          void broadcastSyncEvent("Create", "Request", duplicated.id, duplicated);
+          showToast({
+            kind: "success",
+            title: "Request duplicated",
+            description: `${duplicated.method} ${duplicated.name}`,
+          });
+        } catch (error) {
+          showToast({ kind: "error", title: "Error duplicating request", description: String(error) });
+        }
+      }
+    });
   }
 
   async function handleDeleteRequest(request: StoredRequest) {
-    const ok = window.confirm(`Delete request "${request.name}"?`);
-    if (!ok) {
-      return;
-    }
-    try {
-      await invoke("delete_request", { id: request.id });
-      const current = requestsByCollection[request.collection_id] || [];
-      const remaining = current.filter((item) => item.id !== request.id);
-      setRequestsByCollection((prev) => ({ ...prev, [request.collection_id]: remaining }));
+    openConfirm({
+      title: "Delete Request",
+      description: `Are you sure you want to delete "${request.name}"?`,
+      confirmLabel: "Delete",
+      isDestructive: true,
+      onConfirm: async () => {
+        try {
+          await invoke("delete_request", { id: request.id });
+          const current = requestsByCollection[request.collection_id] || [];
+          const remaining = current.filter((item) => item.id !== request.id);
+          setRequestsByCollection((prev) => ({ ...prev, [request.collection_id]: remaining }));
 
-      if (activeRequestId === request.id) {
-        const nextActive = remaining[0] || null;
-        setActiveRequestId(nextActive?.id || null);
-        if (nextActive) {
-          applyStoredRequest(nextActive);
+          if (activeRequestId === request.id) {
+            const nextActive = remaining[0] || null;
+            setActiveRequestId(nextActive?.id || null);
+            if (nextActive) {
+              applyStoredRequest(nextActive);
+            }
+          }
+          void broadcastSyncEvent("Delete", "Request", request.id, {
+            id: request.id,
+            collection_id: request.collection_id,
+          });
+          showToast({ kind: "success", title: "Request deleted", description: request.name });
+        } catch (error) {
+          showToast({ kind: "error", title: "Error deleting request", description: String(error) });
         }
       }
-      void broadcastSyncEvent("Delete", "Request", request.id, {
-        id: request.id,
-        collection_id: request.collection_id,
-      });
-      showToast({ kind: "success", title: "Request deleted", description: request.name });
-    } catch (error) {
-      showToast({ kind: "error", title: "Error deleting request", description: String(error) });
-    }
+    });
   }
 
   async function handleCopyRequest(request: StoredRequest) {
@@ -1075,60 +1395,66 @@ function App() {
       ? sourceCollection.name.trim()
       : "Pasted Collection";
 
-    const name = window.prompt("Paste collection as:", `${baseName} Copy`);
-    if (!name || !name.trim()) {
-      return;
-    }
+    openPrompt({
+      title: "Paste Collection",
+      description: "Customize the name of the collection you are about to paste.",
+      defaultValue: `${baseName} Copy`,
+      confirmLabel: "Paste Collection",
+      onConfirm: async (name) => {
+        if (!name.trim()) return;
+        try {
+          const createdCollection = await invoke<Collection>("create_collection", {
+            id: generateId(),
+            workspaceId: activeWorkspaceId,
+            workspace_id: activeWorkspaceId,
+            name: name.trim(),
+            ownerId: LOCAL_USER_ID,
+            owner_id: LOCAL_USER_ID,
+          });
 
-    try {
-      const createdCollection = await invoke<Collection>("create_collection", {
-        id: generateId(),
-        name: name.trim(),
-        ownerId: LOCAL_USER_ID,
-        owner_id: LOCAL_USER_ID,
-      });
+          setCollections((prev) => [...prev, createdCollection]);
+          setRequestsByCollection((prev) => ({ ...prev, [createdCollection.id]: [] }));
+          setExpandedCollections((prev) => ({ ...prev, [createdCollection.id]: true }));
+          setActiveCollectionId(createdCollection.id);
+          setActiveRequestId(null);
 
-      setCollections((prev) => [...prev, createdCollection]);
-      setRequestsByCollection((prev) => ({ ...prev, [createdCollection.id]: [] }));
-      setExpandedCollections((prev) => ({ ...prev, [createdCollection.id]: true }));
-      setActiveCollectionId(createdCollection.id);
-      setActiveRequestId(null);
+          const requestsToCreate = getClipboardRequests(parsed);
+          let createdCount = 0;
+          const createdRequests: StoredRequest[] = [];
+          for (const request of requestsToCreate) {
+            const created = await invoke<StoredRequest>("create_request", {
+              id: generateId(),
+              collectionId: createdCollection.id,
+              collection_id: createdCollection.id,
+              name: request.name,
+              method: request.method,
+              url: request.url,
+              headers: request.headers,
+              body: request.body,
+            });
+            createdRequests.push(created);
+            createdCount += 1;
+          }
 
-      const requestsToCreate = getClipboardRequests(parsed);
-      let createdCount = 0;
-      const createdRequests: StoredRequest[] = [];
-      for (const request of requestsToCreate) {
-        const created = await invoke<StoredRequest>("create_request", {
-          id: generateId(),
-          collectionId: createdCollection.id,
-          collection_id: createdCollection.id,
-          name: request.name,
-          method: request.method,
-          url: request.url,
-          headers: request.headers,
-          body: request.body,
-        });
-        createdRequests.push(created);
-        createdCount += 1;
+          await fetchRequests(createdCollection.id);
+          void broadcastSyncEvent("Create", "Collection", createdCollection.id, createdCollection);
+          createdRequests.forEach((request) => {
+            void broadcastSyncEvent("Create", "Request", request.id, request);
+          });
+          showToast({
+            kind: "success",
+            title: "Collection pasted",
+            description: `${createdCollection.name}${createdCount > 0 ? ` (${createdCount} requests)` : ""}`,
+          });
+        } catch (error) {
+          showToast({
+            kind: "error",
+            title: "Error pasting collection",
+            description: String(error),
+          });
+        }
       }
-
-      await fetchRequests(createdCollection.id);
-      void broadcastSyncEvent("Create", "Collection", createdCollection.id, createdCollection);
-      createdRequests.forEach((request) => {
-        void broadcastSyncEvent("Create", "Request", request.id, request);
-      });
-      showToast({
-        kind: "success",
-        title: "Collection pasted",
-        description: `${createdCollection.name}${createdCount > 0 ? ` (${createdCount} requests)` : ""}`,
-      });
-    } catch (error) {
-      showToast({
-        kind: "error",
-        title: "Error pasting collection",
-        description: String(error),
-      });
-    }
+    });
   }
 
   async function handlePasteRequest(collectionId: string) {
@@ -1333,42 +1659,125 @@ function App() {
 
   return (
     <div className="flex flex-col h-screen w-full bg-[#121212] text-gray-200 font-sans overflow-hidden">
-      <TopBar peersCount={peersCount} workspaceOptions={workspaceOptions} />
+      <TopBar
+        peersCount={peersCount}
+        workspaces={workspaces}
+        activeWorkspaceId={activeWorkspaceId}
+        setActiveWorkspaceId={setActiveWorkspaceId}
+        onCreateWorkspace={handleCreateWorkspace}
+      />
 
       <div className="flex-1 flex overflow-hidden">
-        <CollectionsSidebar
-          collections={collections}
-          activeCollectionId={activeCollectionId}
-          setActiveCollectionId={setActiveCollectionId}
-          expandedCollections={expandedCollections}
-          toggleCollectionExpanded={toggleCollectionExpanded}
-          requestsByCollection={requestsByCollection}
-          activeRequestId={activeRequestId}
-          onSelectRequest={(request) => {
-            setActiveRequestId(request.id);
-            applyStoredRequest(request);
-          }}
-          onCreateCollection={handleCreateCollectionClick}
-          onCreateRequest={handleCreateRequestClick}
-          onCopyCollection={handleCopyCollection}
-          onPasteCollection={handlePasteCollection}
-          onRenameCollection={handleRenameCollection}
-          onDuplicateCollection={handleDuplicateCollection}
-          onDeleteCollection={handleDeleteCollection}
-          onCopyRequest={handleCopyRequest}
-          onPasteRequest={handlePasteRequest}
-          onRenameRequest={handleRenameRequest}
-          onDuplicateRequest={handleDuplicateRequest}
-          onDeleteRequest={handleDeleteRequest}
-          isLoadingRequests={isLoadingRequests}
-          isCreatingRequest={isCreatingRequest}
-          peersCount={peersCount}
-        />
+        {isSidebarVisible && (
+          <CollectionsSidebar
+            collections={collections}
+            foldersByCollection={foldersByCollection}
+            activeCollectionId={activeCollectionId}
+            setActiveCollectionId={setActiveCollectionId}
+            expandedCollections={expandedCollections}
+            toggleCollectionExpanded={toggleCollectionExpanded}
+            expandedFolders={expandedFolders}
+            toggleFolderExpanded={toggleFolderExpanded}
+            requestsByCollection={requestsByCollection}
+            activeRequestId={activeRequestId}
+            activeRequestIsDirty={isDirty}
+            onSelectRequest={(request) => {
+              setActiveRequestId(request.id);
+              applyStoredRequest(request);
+            }}
+            onCreateCollection={handleCreateCollectionClick}
+            onCreateFolder={(collectionId) => {
+              openPrompt({
+                title: "New Folder",
+                description: "Group requests within your collection.",
+                confirmLabel: "Create Folder",
+                placeholder: "e.g., Auth, Payments",
+                onConfirm: async (name) => {
+                  if (!name) return;
+                  try {
+                    const folder = await invoke<Folder>("create_folder", {
+                      id: uuidv4(),
+                      collectionId,
+                      name,
+                      position: (foldersByCollection[collectionId]?.length || 0) + 1
+                    });
+                    setFoldersByCollection(prev => ({
+                      ...prev,
+                      [collectionId]: [...(prev[collectionId] || []), folder]
+                    }));
+                    setExpandedFolders(prev => ({ ...prev, [folder.id]: true }));
+                  } catch (err) {
+                    console.error("Failed to create folder:", err);
+                  }
+                }
+              });
+            }}
+            onCreateRequest={handleCreateRequestClick}
+            onCopyCollection={handleCopyCollection}
+            onPasteCollection={handlePasteCollection}
+            onRenameCollection={handleRenameCollection}
+            onDuplicateCollection={handleDuplicateCollection}
+            onDeleteCollection={handleDeleteCollection}
+            onRenameFolder={(folder) => {
+              openPrompt({
+                title: "Rename Folder",
+                defaultValue: folder.name,
+                confirmLabel: "Rename",
+                onConfirm: async (name) => {
+                  if (!name || name === folder.name) return;
+                  try {
+                    const updated = await invoke<Folder>("rename_folder", { id: folder.id, name });
+                    setFoldersByCollection(prev => ({
+                      ...prev,
+                      [folder.collection_id]: (prev[folder.collection_id] || []).map(f => f.id === updated.id ? updated : f)
+                    }));
+                  } catch (err) {
+                    console.error("Failed to rename folder:", err);
+                  }
+                }
+              });
+            }}
+            onDeleteFolder={(folder) => {
+              openConfirm({
+                title: "Delete Folder",
+                description: `Are you sure you want to delete "${folder.name}"? This will also remove all requests inside this folder.`,
+                confirmLabel: "Delete",
+                isDestructive: true,
+                onConfirm: async () => {
+                  try {
+                    await invoke("delete_folder", { id: folder.id });
+                    setFoldersByCollection(prev => ({
+                      ...prev,
+                      [folder.collection_id]: (prev[folder.collection_id] || []).filter(f => f.id !== folder.id)
+                    }));
+                    setRequestsByCollection(prev => ({
+                      ...prev,
+                      [folder.collection_id]: (prev[folder.collection_id] || []).filter(r => r.folder_id !== folder.id)
+                    }));
+                  } catch (err) {
+                    console.error("Failed to delete folder:", err);
+                  }
+                }
+              });
+            }}
+            onMoveFolder={handleMoveFolder}
+            onMoveRequest={handleMoveRequest}
+            onCopyRequest={handleCopyRequest}
+            onPasteRequest={handlePasteRequest}
+            onRenameRequest={handleRenameRequest}
+            onDuplicateRequest={handleDuplicateRequest}
+            onDeleteRequest={handleDeleteRequest}
+            isLoadingRequests={isLoadingRequests}
+            isCreatingRequest={isCreatingRequest}
+            peersCount={peersCount}
+          />
+        )}
 
         <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e]">
           <RequestWorkspace
             activeCollectionName={activeCollection?.name || ""}
             activeRequestName={activeRequest?.name || ""}
+            isDirty={isDirty}
             isCreatingRequest={isCreatingRequest}
             isSavingRequest={isSavingRequest}
             onCreateRequest={() => {
@@ -1414,6 +1823,31 @@ function App() {
         />
       </div>
       <ToastViewport toasts={toasts} onDismiss={dismissToast} />
+
+      {dialogState.isOpen && dialogState.type === "prompt" && (
+        <PromptDialog
+          isOpen={dialogState.isOpen}
+          onClose={() => setDialogState(prev => ({ ...prev, isOpen: false }))}
+          title={dialogState.title}
+          description={dialogState.description}
+          defaultValue={dialogState.defaultValue}
+          onConfirm={dialogState.onConfirm}
+          placeholder={dialogState.placeholder}
+          confirmLabel={dialogState.confirmLabel}
+        />
+      )}
+
+      {dialogState.isOpen && dialogState.type === "confirm" && (
+        <ConfirmDialog
+          isOpen={dialogState.isOpen}
+          onClose={() => setDialogState(prev => ({ ...prev, isOpen: false }))}
+          title={dialogState.title}
+          description={dialogState.description || ""}
+          onConfirm={() => dialogState.onConfirm("")}
+          confirmLabel={dialogState.confirmLabel}
+          isDestructive={dialogState.isDestructive}
+        />
+      )}
     </div>
   );
 }

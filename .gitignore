@@ -27,3 +27,4 @@ src-tauri/err.txt
 *.njsproj
 *.sln
 *.sw?
+*.cargo-target

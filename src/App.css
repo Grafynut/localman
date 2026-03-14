@@ -1,24 +1,27 @@
 @import "tailwindcss";
 
-:root {
-  --color-background: #1e1e1e;
-  /* VS Code inner background */
-  --color-surface: #252526;
-  /* VS Code panel background */
-  --color-surface-hover: #2d2d2d;
-  --color-primary: #9d4edd;
-  /* Purple Accent */
-  --color-primary-hover: #7b2cbf;
-  --color-border: #333333;
-  --color-muted: #858585;
+@theme {
+  --color-background: #090909;
+  --color-surface: #121212;
+  --color-surface-hover: #1C1C1C;
+  --color-primary: #FF6A13;
+  --color-primary-hover: #F55E00;
+  --color-border: #212121;
+  --color-muted: #6B6B6B;
+
+  --color-method-get: #0CBB52;
+  --color-method-post: #FFB400;
+  --color-method-put: #097BED;
+  --color-method-delete: #EB2013;
+  --color-method-patch: #6B5AE0;
 }
 
 body {
-  background-color: #121212;
-  /* Main window background */
-  color: #cccccc;
-  /* Base text color */
+  background-color: var(--color-background);
+  color: #ECECEC;
   font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   margin: 0;
   padding: 0;
 }
@@ -46,4 +49,13 @@ input:focus,
 textarea:focus,
 select:focus {
   outline: none;
+}
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
 }

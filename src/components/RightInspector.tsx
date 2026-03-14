@@ -32,50 +32,60 @@ export function RightInspector({
   }));
 
   return (
-    <div className="w-[300px] bg-surface flex flex-col border-l border-border shrink-0 z-10">
+    <div className="w-[300px] bg-surface flex flex-col border-l border-border shrink-0 z-10 selection:bg-primary/20">
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="p-5 border-b border-border">
-          <button onClick={() => setInfoOpen((prev) => !prev)} className="w-full flex items-center justify-between mb-4">
-            <h3 className="text-[13px] font-bold text-gray-200 tracking-wide">Collection Info</h3>
+        <div className="p-6 border-b border-border bg-surface/30">
+          <button onClick={() => setInfoOpen((prev) => !prev)} className="w-full flex items-center justify-between mb-4 group">
+            <h3 className="text-[11px] font-bold text-muted uppercase tracking-widest group-hover:text-gray-200 transition-colors">Collection Info</h3>
             <ChevronDown size={14} className={`text-muted transition-transform ${infoOpen ? "" : "-rotate-90"}`} />
           </button>
           {infoOpen && (
-            <div className="space-y-3 text-[13px]">
-              <div className="text-muted">Metadata</div>
-              <div className="text-muted">Created by: <span className="text-gray-200">you</span></div>
-              <div className="text-muted">Collection: <span className="text-gray-200">{activeCollectionName || "None"}</span></div>
-              <div className="text-muted">Requests: <span className="text-gray-200">{activeRequestsCount}</span></div>
+            <div className="space-y-4 text-[13px]">
+              <div className="flex items-center justify-between">
+                <span className="text-muted font-medium">Author</span>
+                <span className="text-gray-200 font-bold">You</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted font-medium">Active</span>
+                <span className="text-gray-200 font-bold truncate max-w-[150px]">{activeCollectionName || "None"}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted font-medium">Resources</span>
+                <span className="text-primary font-bold">{activeRequestsCount}</span>
+              </div>
             </div>
           )}
         </div>
 
-        <div className="p-5 border-b border-border">
-          <button onClick={() => setCollabOpen((prev) => !prev)} className="w-full flex items-center justify-between mb-4">
-            <h3 className="text-[13px] font-bold text-gray-200 tracking-wide">Collaboration</h3>
+        <div className="p-6 border-b border-border bg-surface/10">
+          <button onClick={() => setCollabOpen((prev) => !prev)} className="w-full flex items-center justify-between mb-4 group">
+            <h3 className="text-[11px] font-bold text-muted uppercase tracking-widest group-hover:text-gray-200 transition-colors">Collaboration</h3>
             <ChevronDown size={14} className={`text-muted transition-transform ${collabOpen ? "" : "-rotate-90"}`} />
           </button>
 
           {collabOpen && (
             <>
-              <div className="flex items-center justify-between mb-3 text-[12px] text-muted font-medium">
-                <span>Available Devices</span>
-                <Monitor size={14} />
+              <div className="flex items-center justify-between mb-4 text-[11px] text-muted font-bold uppercase tracking-widest">
+                <span>LAN Devices</span>
+                <Monitor size={12} className="opacity-50" />
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {Object.keys(peers).length === 0 ? (
-                  <div className="px-2 py-4 text-center text-[12px] text-muted italic border border-dashed border-border rounded">
-                    No LAN devices discovered
+                  <div className="px-3 py-6 text-center text-[12px] text-muted font-medium border border-dashed border-border rounded-lg bg-background/50">
+                    Scanning for peers...
                   </div>
                 ) : (
                   Object.entries(peers).map(([name, ip]) => (
-                    <div key={name} className="space-y-2 group">
-                      <div className="flex items-center justify-between">
+                    <div key={name} className="p-3 bg-background border border-border rounded-xl group transition-all hover:border-primary/30">
+                      <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center space-x-3">
-                          <Monitor size={18} className="text-gray-400" />
-                          <div className="flex flex-col">
-                            <span className="text-[13px] text-gray-200 font-medium" title={ip}>{name.split(".")[0]}</span>
-                            <span className="text-[10px] text-blue-400 font-mono tracking-wider">{ip}</span>
+                          <div className="w-8 h-8 rounded-lg bg-surface-hover flex items-center justify-center border border-border group-hover:border-primary/20 transition-colors">
+                            <Monitor size={16} className="text-muted group-hover:text-primary" />
+                          </div>
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-[13px] text-gray-100 font-bold truncate" title={ip}>{name.split(".")[0]}</span>
+                            <span className="text-[10px] text-primary/70 font-black font-mono tracking-wider">{ip}</span>
                           </div>
                         </div>
                         <MoreHorizontal size={14} className="text-muted cursor-pointer hover:text-white" />
@@ -83,20 +93,20 @@ export function RightInspector({
                       <div className="flex space-x-2">
                         <button
                           onClick={() => onTogglePeerConnection(ip)}
-                          className={`flex-1 py-1 border text-[11px] font-medium rounded transition-colors block text-center ${
+                          className={`flex-1 py-1.5 border text-[11px] font-black uppercase tracking-widest rounded-lg transition-all active:scale-95 ${
                             connectedPeerIps[ip]
-                              ? "bg-primary/10 border-primary/30 text-primary"
-                              : "bg-background border-border hover:border-gray-500 text-gray-300"
+                              ? "bg-method-get/10 border-method-get/20 text-method-get"
+                              : "bg-surface-hover border-border hover:border-muted text-gray-300"
                           }`}
                         >
-                          {connectedPeerIps[ip] ? "Connected" : "Connect"}
+                          {connectedPeerIps[ip] ? "Online" : "Connect"}
                         </button>
                         <button
                           onClick={() => onSharePeer(name, ip)}
                           disabled={sharingPeerIp === ip}
-                          className="flex-1 flex items-center justify-center bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 py-1 text-[11px] font-medium rounded transition-colors disabled:opacity-60"
+                          className="flex-1 flex items-center justify-center bg-primary text-white border border-primary/20 hover:bg-primary-hover py-1.5 text-[11px] font-black uppercase tracking-widest rounded-lg transition-all active:scale-95 shadow-lg shadow-primary/5 disabled:opacity-30"
                         >
-                          {sharingPeerIp === ip ? "Sharing..." : "Share"}
+                          {sharingPeerIp === ip ? "Synced" : "Share"}
                         </button>
                       </div>
                     </div>
@@ -107,35 +117,35 @@ export function RightInspector({
           )}
         </div>
 
-        <div className="p-5">
-          <button onClick={() => setTeamOpen((prev) => !prev)} className="w-full flex items-center justify-between mb-4">
-            <h3 className="text-[13px] font-bold text-gray-200 tracking-wide">Team Members</h3>
+        <div className="p-6">
+          <button onClick={() => setTeamOpen((prev) => !prev)} className="w-full flex items-center justify-between mb-4 group">
+            <h3 className="text-[11px] font-bold text-muted uppercase tracking-widest group-hover:text-gray-200 transition-colors">Team Members</h3>
             <ChevronDown size={14} className={`text-muted transition-transform ${teamOpen ? "" : "-rotate-90"}`} />
           </button>
           {teamOpen && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between text-[13px]">
+            <div className="space-y-5">
+              <div className="flex items-center justify-between text-[13px] group">
                 <div className="flex items-center space-x-3">
-                  <div className="w-6 h-6 rounded-full bg-blue-500/20 border border-blue-500 text-blue-500 flex items-center justify-center font-bold text-[10px]">YO</div>
-                  <span className="text-gray-300">You</span>
+                  <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/30 text-primary flex items-center justify-center font-black text-[10px] shadow-lg shadow-primary/5">YOU</div>
+                  <span className="text-gray-200 font-bold">You</span>
                 </div>
-                <span className="text-muted">Owner</span>
+                <span className="text-muted text-[11px] font-bold uppercase tracking-wider">Owner</span>
               </div>
               {peerMembers.map((member) => (
-                <div key={member.id} className="flex items-center justify-between text-[13px]">
+                <div key={member.id} className="flex items-center justify-between text-[13px] group">
                   <div className="flex items-center space-x-3">
-                    <div className="w-6 h-6 rounded-full bg-purple-500/20 border border-purple-500 text-purple-500 flex items-center justify-center font-bold text-[10px]">{member.initials}</div>
-                    <div className="flex flex-col">
-                      <span className="text-gray-300">{member.name}</span>
-                      <span className="text-[10px] text-blue-400 font-mono">{member.detail}</span>
+                    <div className="w-8 h-8 rounded-full bg-method-put/10 border border-method-put/30 text-method-put flex items-center justify-center font-black text-[10px]">{member.initials}</div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-gray-200 font-bold truncate max-w-[120px]">{member.name}</span>
+                      <span className="text-[10px] text-muted font-black font-mono tracking-wider">{member.detail}</span>
                     </div>
                   </div>
-                  <span className="text-muted">{member.role}</span>
+                  <span className="text-muted text-[11px] font-medium italic">{member.role}</span>
                 </div>
               ))}
               {peerMembers.length === 0 && (
-                <div className="text-[12px] text-muted italic border border-dashed border-border rounded px-3 py-2">
-                  No collaborators connected yet.
+                <div className="text-[12px] text-muted font-medium border border-dashed border-border rounded-lg px-4 py-3 bg-background/30 italic">
+                  No collaborators yet.
                 </div>
               )}
             </div>
