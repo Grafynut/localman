@@ -60,6 +60,9 @@ pub async fn run() {
             db::update_environment,
             db::delete_environment,
             db::set_active_environment,
+            db::save_history_entry,
+            db::get_history,
+            db::clear_history,
             http::execute_request,
             network::get_known_peers
         ])

@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from "react";
-import { Activity, ChevronDown, Plus, Search, Settings, User, Users } from "lucide-react";
+import { Activity, ChevronDown, Plus, Search, Settings, User, Users, Keyboard } from "lucide-react";
 import type { Workspace, Environment } from "../types";
 import { EnvironmentSelector } from "./EnvironmentSelector";
 
@@ -13,6 +13,7 @@ type Props = {
   activeEnvId: string | null;
   onSetActiveEnv: (id: string | null) => void;
   onOpenEnvManager: () => void;
+  onOpenShortcuts: () => void;
 };
 
 export function TopBar({ 
@@ -24,7 +25,8 @@ export function TopBar({
   environments,
   activeEnvId,
   onSetActiveEnv,
-  onOpenEnvManager
+  onOpenEnvManager,
+  onOpenShortcuts
 }: Props) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -184,6 +186,10 @@ export function TopBar({
 
         <div className="w-8 h-8 rounded-full bg-surface-hover border border-border flex items-center justify-center cursor-pointer hover:border-primary transition-all active:scale-90">
           <User size={16} className="text-gray-400" />
+        </div>
+
+        <div onClick={onOpenShortcuts} className="text-muted hover:text-primary cursor-pointer transition-all hover:scale-110 active:scale-90" title="Keyboard Shortcuts (?)">
+          <Keyboard size={20} />
         </div>
 
         <div className="text-muted hover:text-primary cursor-pointer transition-all hover:rotate-45 active:scale-90">

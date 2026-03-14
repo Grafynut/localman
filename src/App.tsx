@@ -33,6 +33,9 @@ import {
 } from "./utils";
 import { EnvironmentManager } from "./components/EnvironmentManager";
 import { ImportModal } from "./components/ImportModal";
+import { HistoryPanel } from "./components/HistoryPanel";
+import { ShortcutsModal } from "./components/ShortcutsModal";
+import { CodeSnippetModal } from "./components/CodeSnippetModal";
 import { v4 as uuidv4 } from "uuid";
 import { parseCurl, parsePostman } from "./utils";
 import "./App.css";
@@ -63,6 +66,9 @@ function App() {
   const [activeEnvId, setActiveEnvId] = useState<string | null>(null);
   const [isEnvManagerOpen, setIsEnvManagerOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [isCodeSnippetOpen, setIsCodeSnippetOpen] = useState(false);
 
   const [responseHeight, setResponseHeight] = useState(() => {
     const saved = localStorage.getItem("devcollab.responseHeight");
@@ -279,6 +285,12 @@ function App() {
         setIsEnvManagerOpen(true);
       }
 
+      // Ctrl/Cmd + H: Toggle History
+      if (isMod && e.key === "h") {
+        e.preventDefault();
+        setIsHistoryOpen(prev => !prev);
+      }
+
       // Ctrl/Cmd + K: Focus Search
       if (isMod && e.key === "k") {
         e.preventDefault();
@@ -290,6 +302,15 @@ function App() {
       if (isMod && e.key === "\\") {
         e.preventDefault();
         setIsSidebarVisible((prev) => !prev);
+      }
+
+      // ?: Toggle Shortcuts Modal (only when not typing in an input)
+      if (e.key === "?" && !isMod) {
+        const tag = document.activeElement?.tagName.toLowerCase();
+        if (tag !== "input" && tag !== "textarea" && !(document.activeElement as HTMLElement)?.isContentEditable) {
+          e.preventDefault();
+          setIsShortcutsOpen((prev) => !prev);
+        }
       }
     };
 
@@ -1793,14 +1814,17 @@ function App() {
         },
       });
       setReqResponse(response);
+      void saveRequestToHistory(reqMethod, finalUrl, resolvedHeaders, resolvedBody, response);
     } catch (error) {
-      setReqResponse({
+      const errResponse = {
         error: String(error),
         status: 0,
         headers: {},
         body: "",
         time_ms: 0,
-      });
+      };
+      setReqResponse(errResponse);
+      void saveRequestToHistory(reqMethod, finalUrl, resolvedHeaders, resolvedBody, errResponse);
       showToast({
         kind: "error",
         title: "Request failed",
@@ -1809,6 +1833,38 @@ function App() {
     } finally {
       setIsSending(false);
     }
+  }
+
+  async function saveRequestToHistory(method: string, url: string, headersObj: Record<string, string>, body: string | null, response: any) {
+    try {
+      await invoke("save_history_entry", {
+        id: generateId(),
+        workspaceId: activeWorkspaceId,
+        requestId: activeRequestId,
+        method,
+        url,
+        requestHeaders: JSON.stringify(headersObj),
+        requestBody: body,
+        statusCode: response?.status ?? null,
+        responseBody: response?.body ?? response?.error ?? null,
+        responseHeaders: response?.headers ? JSON.stringify(response.headers) : null,
+        timeMs: response?.time_ms ?? null,
+      });
+    } catch (err) {
+      console.error("Failed to save history", err);
+    }
+  }
+
+  function handleHistoryRestore(entry: { method: string; url: string; request_headers: string | null; request_body: string | null }) {
+    setReqMethod(entry.method);
+    setReqUrl(entry.url);
+    setReqBody(entry.request_body || "");
+    if (entry.request_headers) {
+      try {
+        setReqHeaders(parseHeadersToRows(entry.request_headers));
+      } catch { /* ignore */ }
+    }
+    showToast({ kind: "success", title: "Request Restored", description: `${entry.method} ${entry.url}` });
   }
 
   async function handleSaveRequest() {
@@ -1931,6 +1987,7 @@ function App() {
         activeEnvId={activeEnvId}
         onSetActiveEnv={handleSetActiveEnvironment}
         onOpenEnvManager={() => setIsEnvManagerOpen(true)}
+        onOpenShortcuts={() => setIsShortcutsOpen(true)}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -2034,6 +2091,7 @@ function App() {
             onDuplicateRequest={handleDuplicateRequest}
             onDeleteRequest={handleDeleteRequest}
             onImport={() => setIsImportModalOpen(true)}
+            onHistory={() => setIsHistoryOpen(true)}
             isLoadingRequests={isLoadingRequests}
             isCreatingRequest={isCreatingRequest}
             peersCount={peersCount}
@@ -2086,6 +2144,7 @@ function App() {
             respTab={respTab}
             setRespTab={setRespTab}
             height={responseHeight}
+            onOpenCode={() => setIsCodeSnippetOpen(true)}
           />
         </div>
 
@@ -2140,6 +2199,28 @@ function App() {
         onClose={() => setIsImportModalOpen(false)}
         onImportCurl={handleImportCurl}
         onImportPostman={handleImportPostman}
+      />
+
+      <HistoryPanel
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        workspaceId={activeWorkspaceId}
+        onRestore={handleHistoryRestore}
+      />
+
+      <ShortcutsModal
+        isOpen={isShortcutsOpen}
+        onClose={() => setIsShortcutsOpen(false)}
+      />
+
+      <CodeSnippetModal
+        isOpen={isCodeSnippetOpen}
+        onClose={() => setIsCodeSnippetOpen(false)}
+        method={reqMethod}
+        url={reqUrl}
+        headers={headerRowsToObject(reqHeaders)}
+        body={reqBody}
+        responseBody={reqResponse && "body" in reqResponse ? reqResponse.body : null}
       />
     </div>
   );

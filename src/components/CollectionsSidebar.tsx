@@ -1,7 +1,7 @@
-import { ChevronRight, Folder as FolderIcon, MoreHorizontal, Plus, GripVertical, Upload } from "lucide-react";
+import { ChevronRight, Folder as FolderIcon, MoreHorizontal, Plus, GripVertical, Upload, History as HistoryIcon } from "lucide-react";
 import { useMemo, useState, useCallback } from "react";
-import { 
-  DndContext, 
+import {
+  DndContext,
   closestCenter,
   KeyboardSensor,
   PointerSensor,
@@ -56,6 +56,7 @@ type Props = {
   isCreatingRequest: boolean;
   activeRequestIsDirty: boolean;
   onImport: () => void;
+  onHistory: () => void;
   peersCount: number;
 };
 
@@ -84,9 +85,9 @@ function CollectionHeader({
   setMenuId,
   isOpen,
 }: CollectionHeaderProps) {
-  const { setNodeRef, isOver } = useSortable({ 
-    id: collection.id, 
-    data: { type: 'collection', collection } 
+  const { setNodeRef, isOver } = useSortable({
+    id: collection.id,
+    data: { type: 'collection', collection }
   });
 
   return (
@@ -219,7 +220,7 @@ function FolderItem({
 
   return (
     <div ref={setNodeRef} style={style} className="flex flex-col mb-1 group/folder">
-      <div 
+      <div
         onClick={() => toggleFolderExpanded(folder.id)}
         className={`flex items-center px-4 py-1.5 cursor-pointer group rounded transition-all ${isOver ? "bg-primary/15 ring-1 ring-primary/50 text-gray-100" : "text-gray-400 hover:bg-surface-hover hover:text-gray-200"}`}
       >
@@ -232,9 +233,9 @@ function FolderItem({
         />
         <FolderIcon size={14} className="mr-2 text-primary/70" />
         <span className="truncate text-[12px] font-semibold">{folder.name}</span>
-        
+
         <div className="ml-auto flex items-center space-x-1">
-          <button 
+          <button
             onClick={(e) => {
               e.stopPropagation();
               onCreateRequest(folder.collection_id, folder.id);
@@ -281,7 +282,7 @@ function FolderItem({
           </div>
         </div>
       </div>
-      
+
       {folderExpanded && (
         <div className="ml-6 flex flex-col border-l border-border/50">
           <SortableContext items={folderRequests.map(r => r.id)} strategy={verticalListSortingStrategy}>
@@ -289,7 +290,7 @@ function FolderItem({
               <div className="px-4 py-1.5 text-[11px] text-muted italic">Empty folder</div>
             ) : (
               folderRequests.map((request) => (
-                <RequestItem 
+                <RequestItem
                   key={request.id}
                   request={request}
                   activeRequestId={activeRequestId}
@@ -363,11 +364,10 @@ function RequestItem({
     <div
       ref={setNodeRef}
       style={style}
-      className={`group/request flex items-center px-4 py-1.5 cursor-pointer transition-all border-l-2 ${
-        activeRequestId === request.id
-          ? "bg-primary/5 border-primary text-gray-100"
-          : "border-transparent text-gray-400 hover:text-gray-200 hover:bg-surface-hover/50"
-      } ${isOver ? "bg-primary/10 ring-1 ring-primary/40 ring-inset" : ""}`}
+      className={`group/request flex items-center px-4 py-1.5 cursor-pointer transition-all border-l-2 ${activeRequestId === request.id
+        ? "bg-primary/5 border-primary text-gray-100"
+        : "border-transparent text-gray-400 hover:text-gray-200 hover:bg-surface-hover/50"
+        } ${isOver ? "bg-primary/10 ring-1 ring-primary/40 ring-inset" : ""}`}
     >
       <div {...attributes} {...listeners} className="mr-1 opacity-0 group-hover/request:opacity-40 hover:opacity-100 transition-opacity p-0.5 cursor-grab active:cursor-grabbing">
         <GripVertical size={10} />
@@ -488,12 +488,13 @@ export function CollectionsSidebar({
   isCreatingRequest,
   activeRequestIsDirty,
   onImport,
+  onHistory,
   peersCount,
 }: Props) {
   const [openCollectionMenuId, setOpenCollectionMenuId] = useState<string | null>(null);
   const [openFolderMenuId, setOpenFolderMenuId] = useState<string | null>(null);
   const [openRequestMenuId, setOpenRequestMenuId] = useState<string | null>(null);
-  
+
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<'request' | 'folder' | null>(null);
   const [activeItem, setActiveItem] = useState<any>(null);
@@ -509,7 +510,7 @@ export function CollectionsSidebar({
     const { active } = event;
     setActiveId(active.id as string);
     setActiveType(active.data.current?.type);
-    
+
     // Find the actual item data
     if (active.data.current?.type === 'request') {
       const allReqs = Object.values(requestsByCollection).flat();
@@ -530,7 +531,7 @@ export function CollectionsSidebar({
 
     const activeData = active.data.current;
     const overId = over.id as string;
-    
+
     let targetCollectionId = "";
     let targetFolderId: string | null = null;
     let targetPosition = 0;
@@ -542,7 +543,7 @@ export function CollectionsSidebar({
       if (reqIdx !== -1) {
         targetCollectionId = col.id;
         const overReq = reqs[reqIdx];
-        
+
         if (activeData?.type === 'request') {
           // Reordering request within its container (root or folder)
           targetFolderId = overReq.folder_id || null;
@@ -556,7 +557,7 @@ export function CollectionsSidebar({
         }
         break;
       }
-      
+
       // Is it a folder in this collection?
       const folders = foldersByCollection[col.id] || [];
       const folderIdx = folders.findIndex(f => f.id === overId);
@@ -574,7 +575,7 @@ export function CollectionsSidebar({
         }
         break;
       }
-      
+
       // Is it the collection itself?
       if (col.id === overId) {
         targetCollectionId = col.id;
@@ -616,7 +617,7 @@ export function CollectionsSidebar({
   }, []);
 
   return (
-    <DndContext 
+    <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragStart={handleDragStart}
@@ -639,12 +640,21 @@ export function CollectionsSidebar({
             <Plus size={16} strokeWidth={2.5} />
             <span>{isCreatingRequest ? "Creating..." : "New Collection"}</span>
           </button>
-          <button
-            onClick={onImport}
-            className="w-full h-8 flex items-center justify-center bg-transparent border border-border hover:bg-surface-hover text-gray-400 hover:text-gray-200 rounded-md transition-colors text-[12px] font-medium"
-          >
-            Import
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={onImport}
+              className="flex-1 h-8 flex items-center justify-center bg-surface border border-border hover:bg-surface-hover text-gray-300 hover:text-white rounded-md transition-colors text-[12px] font-medium"
+            >
+              Import
+            </button>
+            <button
+              onClick={onHistory}
+              className="h-8 w-8 flex items-center justify-center bg-surface hover:bg-surface-hover text-gray-400 hover:text-primary rounded-md transition-colors shrink-0"
+              title="Request History (Ctrl+H)"
+            >
+              <HistoryIcon size={14} />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-2">
@@ -654,14 +664,14 @@ export function CollectionsSidebar({
                 Collections
               </span>
               <div className="flex items-center space-x-1">
-                <button 
+                <button
                   onClick={onPasteCollection}
                   className="p-1 hover:bg-surface-hover rounded text-muted hover:text-gray-200 transition-colors"
                   title="Paste Collection"
                 >
                   <Upload size={14} />
                 </button>
-                <button 
+                <button
                   onClick={onCreateCollection}
                   className="p-1 hover:bg-surface-hover rounded text-muted hover:text-gray-200 transition-colors"
                   title="New Collection"
@@ -682,7 +692,7 @@ export function CollectionsSidebar({
                   const active = activeCollectionId === collection.id;
                   const folders = foldersByCollection[collection.id] || [];
                   const rootRequests = (requestsByCollection[collection.id] || []).filter(r => !r.folder_id);
-                  
+
                   return (
                     <div key={collection.id} className="flex flex-col">
                       <CollectionHeader
@@ -706,7 +716,7 @@ export function CollectionsSidebar({
                           {/* Folders List */}
                           <SortableContext items={folders.map(f => f.id)} strategy={verticalListSortingStrategy}>
                             {folders.map((folder) => (
-                              <FolderItem 
+                              <FolderItem
                                 key={folder.id}
                                 folder={folder}
                                 expandedFolders={expandedFolders}
@@ -745,10 +755,10 @@ export function CollectionsSidebar({
                                 </button>
                               </div>
                             </div>
-                            
+
                             <SortableContext items={rootRequests.map(r => r.id)} strategy={verticalListSortingStrategy}>
                               {rootRequests.map((request) => (
-                                <RequestItem 
+                                <RequestItem
                                   key={request.id}
                                   request={request}
                                   activeRequestId={activeRequestId}

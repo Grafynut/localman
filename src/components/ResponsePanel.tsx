@@ -1,4 +1,4 @@
-import { ChevronDown, Play } from "lucide-react";
+import { ChevronDown, Play, Code } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BodyViewMode, ResponseState, ResponseTab } from "../types";
 import { formatResponseBody } from "../utils";
@@ -9,9 +9,10 @@ type Props = {
   respTab: ResponseTab;
   setRespTab: (tab: ResponseTab) => void;
   height?: number;
+  onOpenCode: () => void;
 };
 
-export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab, height }: Props) {
+export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab, height, onOpenCode }: Props) {
   const [viewMode, setViewMode] = useState<BodyViewMode>("pretty");
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -91,6 +92,15 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab, hei
               <span className="text-muted font-medium">Size</span>
               <span className="text-gray-200">{((reqResponse.body?.length || 0) / 1024).toFixed(2)} KB</span>
             </div>
+            <div className="w-px h-4 bg-border"></div>
+            <button
+              onClick={onOpenCode}
+              className="flex items-center space-x-1.5 text-muted hover:text-primary transition-colors hover:scale-105 active:scale-95"
+              title="Generate Code Snippet"
+            >
+              <Code size={14} />
+              <span className="uppercase">Code</span>
+            </button>
           </div>
         )}
       </div>

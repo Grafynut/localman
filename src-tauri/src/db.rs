@@ -114,6 +114,21 @@ pub fn init_db(
         FOREIGN KEY(collection_id) REFERENCES collections(id)
     )", []);
 
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS request_history (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        request_id TEXT,
+        method TEXT NOT NULL,
+        url TEXT NOT NULL,
+        request_headers TEXT,
+        request_body TEXT,
+        status_code INTEGER,
+        response_body TEXT,
+        response_headers TEXT,
+        time_ms INTEGER,
+        executed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )", []);
+
     Ok(conn)
 }
 
@@ -998,6 +1013,103 @@ pub fn set_active_environment(
                 [&id],
             ).map_err(|e| e.to_string())?;
         }
+        Ok(())
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct HistoryEntry {
+    pub id: String,
+    pub workspace_id: String,
+    pub request_id: Option<String>,
+    pub method: String,
+    pub url: String,
+    pub request_headers: Option<String>,
+    pub request_body: Option<String>,
+    pub status_code: Option<i32>,
+    pub response_body: Option<String>,
+    pub response_headers: Option<String>,
+    pub time_ms: Option<i32>,
+    pub executed_at: String,
+}
+
+#[tauri::command]
+pub fn save_history_entry(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    workspace_id: String,
+    request_id: Option<String>,
+    method: String,
+    url: String,
+    request_headers: Option<String>,
+    request_body: Option<String>,
+    status_code: Option<i32>,
+    response_body: Option<String>,
+    response_headers: Option<String>,
+    time_ms: Option<i32>,
+) -> std::result::Result<(), String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        conn.execute(
+            "INSERT INTO request_history (id, workspace_id, request_id, method, url, request_headers, request_body, status_code, response_body, response_headers, time_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![id, workspace_id, request_id, method, url, request_headers, request_body, status_code, response_body, response_headers, time_ms],
+        ).map_err(|e| e.to_string())?;
+        // Keep only the last 200 entries per workspace
+        conn.execute(
+            "DELETE FROM request_history WHERE workspace_id = ?1 AND id NOT IN (SELECT id FROM request_history WHERE workspace_id = ?1 ORDER BY executed_at DESC LIMIT 200)",
+            [&workspace_id],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn get_history(
+    state: tauri::State<'_, AppState>,
+    workspace_id: String,
+) -> std::result::Result<Vec<HistoryEntry>, String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        let mut stmt = conn.prepare(
+            "SELECT id, workspace_id, request_id, method, url, request_headers, request_body, status_code, response_body, response_headers, time_ms, executed_at FROM request_history WHERE workspace_id = ?1 ORDER BY executed_at DESC LIMIT 200"
+        ).map_err(|e| e.to_string())?;
+        let entries = stmt.query_map([&workspace_id], |row| {
+            Ok(HistoryEntry {
+                id: row.get(0)?,
+                workspace_id: row.get(1)?,
+                request_id: row.get(2)?,
+                method: row.get(3)?,
+                url: row.get(4)?,
+                request_headers: row.get(5)?,
+                request_body: row.get(6)?,
+                status_code: row.get(7)?,
+                response_body: row.get(8)?,
+                response_headers: row.get(9)?,
+                time_ms: row.get(10)?,
+                executed_at: row.get(11)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        let result: Vec<HistoryEntry> = entries.filter_map(|e| e.ok()).collect();
+        Ok(result)
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn clear_history(
+    state: tauri::State<'_, AppState>,
+    workspace_id: String,
+) -> std::result::Result<(), String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        conn.execute(
+            "DELETE FROM request_history WHERE workspace_id = ?1",
+            [&workspace_id],
+        ).map_err(|e| e.to_string())?;
         Ok(())
     } else {
         Err("Database not initialized".to_string())
