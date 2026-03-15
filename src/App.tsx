@@ -91,6 +91,10 @@ function App() {
   const [sharingPeerIp, setSharingPeerIp] = useState<string | null>(null);
 
   const [isSending, setIsSending] = useState(false);
+  const [globals, setGlobals] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem("devcollab.globals");
+    return saved ? JSON.parse(saved) : {};
+  });
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const collectionsRef = useRef<Collection[]>([]);
@@ -138,6 +142,10 @@ function App() {
       return `${Date.now()}-${generateId()}`;
     }
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("devcollab.globals", JSON.stringify(globals));
+  }, [globals]);
 
   const activeCollection = useMemo(
     () => collections.find((collection) => collection.id === activeCollectionId) ?? null,
@@ -542,6 +550,7 @@ function App() {
           if (req.post_request_script) {
              const context = {
                environment: envVars,
+               globals: globals,
                request: {
                  url: req.url,
                  method: req.method,
@@ -557,6 +566,9 @@ function App() {
              const scriptRes = executeScript(req.post_request_script, context);
              tests = scriptRes.testResults || [];
              passed = tests.every(t => t.passed);
+             if (scriptRes.globalMutations) {
+                setGlobals(scriptRes.globalMutations);
+              }
           }
 
           const result: RunnerResult = {
@@ -2160,13 +2172,16 @@ function App() {
       }
     }
 
+    // Merge globals - env takes precedence
+    const resolutionContext = { ...globals, ...originalEnvData };
+
     const headers = headerRowsToObject(activeTab.headers);
     const resolvedHeaders: Record<string, string> = {};
     Object.entries(headers).forEach(([k, v]) => {
-      resolvedHeaders[k] = resolveVariables(v, originalEnvData);
+      resolvedHeaders[k] = resolveVariables(v, resolutionContext);
     });
 
-    let finalUrl = resolveVariables(activeTab.url, originalEnvData);
+    let finalUrl = resolveVariables(activeTab.url, resolutionContext);
     if (!finalUrl.startsWith("http")) {
       finalUrl = `https://jsonplaceholder.typicode.com${finalUrl.startsWith("/") ? finalUrl : `/${finalUrl}`}`;
     }
@@ -2174,7 +2189,7 @@ function App() {
     const queryParams = new URLSearchParams();
     activeTab.params.forEach((param) => {
       if (param.enabled && param.key.trim()) {
-        queryParams.append(param.key.trim(), resolveVariables(param.value, originalEnvData));
+        queryParams.append(param.key.trim(), resolveVariables(param.value, resolutionContext));
       }
     });
 
@@ -2183,11 +2198,12 @@ function App() {
       finalUrl += finalUrl.includes("?") ? `&${queryString}` : `?${queryString}`;
     }
 
-    let resolvedBody = activeTab.body ? resolveVariables(activeTab.body, originalEnvData) : null;
+    let resolvedBody = activeTab.body ? resolveVariables(activeTab.body, resolutionContext) : null;
 
     // Build context for pre-request script
     const preContext = {
       environment: { ...originalEnvData },
+      globals: { ...globals },
       request: {
         url: finalUrl,
         method: activeTab.method,
@@ -2198,6 +2214,7 @@ function App() {
 
     // Execute Pre-request Script
     let envData = { ...originalEnvData };
+    let currentGlobals = { ...globals };
     if (activeTab.preRequestScript) {
       const preResult = executeScript(activeTab.preRequestScript, preContext);
       if (preResult.error) {
@@ -2210,6 +2227,8 @@ function App() {
         // Continue execution but warn the user
       }
       envData = { ...preResult.environmentMutations };
+      currentGlobals = { ...preResult.globalMutations };
+      setGlobals(currentGlobals);
       finalUrl = preResult.requestMutations.url;
       // update headers and body if mutated
       Object.assign(resolvedHeaders, preResult.requestMutations.headers);
@@ -2242,10 +2261,10 @@ function App() {
           body_type: activeTab.bodyType,
           form_data: activeTab.bodyType === "form-data" ? activeTab.formData.map(entry => ({
             ...entry,
-            key: resolveVariables(entry.key, originalEnvData),
-            value: entry.type === "text" ? resolveVariables(entry.value, originalEnvData) : entry.value
+            key: resolveVariables(entry.key, resolutionContext),
+            value: entry.type === "text" ? resolveVariables(entry.value, resolutionContext) : entry.value
           })) : null,
-          binary_file_path: activeTab.bodyType === "binary" ? (activeTab.binaryFilePath ? resolveVariables(activeTab.binaryFilePath, originalEnvData) : null) : null,
+          binary_file_path: activeTab.bodyType === "binary" ? (activeTab.binaryFilePath ? resolveVariables(activeTab.binaryFilePath, resolutionContext) : null) : null,
         },
       });
 
@@ -2255,6 +2274,7 @@ function App() {
       if (activeTab.postRequestScript) {
         const postContext = {
           environment: { ...envData },
+          globals: { ...currentGlobals },
           request: {
              url: finalUrl,
              method: activeTab.method,
@@ -2278,6 +2298,7 @@ function App() {
         }
         testResults = postResult.testResults;
         finalResponse.testResults = testResults;
+        setGlobals(postResult.globalMutations);
       }
 
       setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { 

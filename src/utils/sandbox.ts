@@ -2,6 +2,7 @@ import type { TestResult } from "../types";
 
 export type ScriptContext = {
   environment: Record<string, string>;
+  globals: Record<string, string>;
   request: {
     url: string;
     method: string;
@@ -17,6 +18,7 @@ export type ScriptContext = {
 
 export type ExecutionResult = {
   environmentMutations: Record<string, string>;
+  globalMutations: Record<string, string>;
   requestMutations: {
     url: string;
     method: string;
@@ -36,6 +38,7 @@ class ExpectationError extends Error {
 
 export function executeScript(script: string, context: ScriptContext): ExecutionResult {
   const envMutations: Record<string, string> = { ...context.environment };
+  const globalMutations: Record<string, string> = { ...context.globals };
   const reqMutations = { ...context.request };
   const tests: TestResult[] = [];
 
@@ -49,8 +52,17 @@ export function executeScript(script: string, context: ScriptContext): Execution
         delete envMutations[key];
       },
     },
+    globals: {
+      get: (key: string) => globalMutations[key] || context.globals[key],
+      set: (key: string, value: string) => {
+        globalMutations[key] = String(value);
+      },
+      unset: (key: string) => {
+        delete globalMutations[key];
+      },
+    },
     variables: {
-      get: (key: string) => envMutations[key] || context.environment[key],
+      get: (key: string) => globalMutations[key] || envMutations[key] || context.globals[key] || context.environment[key],
       set: (key: string, value: string) => {
         envMutations[key] = String(value);
       },
@@ -111,12 +123,14 @@ export function executeScript(script: string, context: ScriptContext): Execution
 
     return {
       environmentMutations: envMutations,
+      globalMutations: globalMutations,
       requestMutations: pm.request,
       testResults: tests,
     };
   } catch (error: any) {
     return {
       environmentMutations: envMutations,
+      globalMutations: globalMutations,
       requestMutations: pm.request,
       testResults: tests,
       error: error.message || String(error),

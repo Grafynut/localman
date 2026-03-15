@@ -136,10 +136,28 @@ export function formatResponseBody(rawBody: string, mode: BodyViewMode) {
 
 export function resolveVariables(text: string, env: Record<string, string>): string {
   if (!text) return text;
+  
   // Single pass resolution
   return text.replace(/{{(.*?)}}/g, (match, key) => {
     const trimmedKey = key.trim();
-    return env[trimmedKey] !== undefined ? String(env[trimmedKey]) : match;
+    
+    // Dynamic variables
+    if (trimmedKey.startsWith("$")) {
+      switch (trimmedKey) {
+        case "$guid":
+          return crypto.randomUUID();
+        case "$timestamp":
+          return Math.floor(Date.now() / 1000).toString();
+        case "$isoTimestamp":
+          return new Date().toISOString();
+        case "$randomInt":
+          return Math.floor(Math.random() * 1001).toString();
+        default:
+          return match;
+      }
+    }
+    
+    return env[trimmedKey] !== undefined ? env[trimmedKey] : match;
   });
 }
 

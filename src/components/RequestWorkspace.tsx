@@ -8,12 +8,13 @@ import {
   Save,
   Trash,
 } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { KeyValueEditor } from "./KeyValueEditor";
 import { FormDataEditor } from "./FormDataEditor";
 import { methodColor } from "../utils";
 import { VariableInput } from "./VariableInput";
+import { ScriptSnippets } from "./ScriptSnippets";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { KeyValuePair, WorkspaceTab, Environment, FormDataEntry } from "../types";
 
@@ -88,6 +89,32 @@ export function RequestWorkspace({
 }: Props) {
   const [isMethodOpen, setIsMethodOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const insertSnippet = useCallback((code: string, type: "pre" | "post") => {
+    const isPre = type === "pre";
+    const currentVal = isPre ? reqPreRequestScript : reqPostRequestScript;
+    const setter = isPre ? setReqPreRequestScript : setReqPostRequestScript;
+    const targetId = isPre ? "pre-script-textarea" : "post-script-textarea";
+    
+    const textarea = document.getElementById(targetId) as HTMLTextAreaElement;
+    if (!textarea) {
+      setter((currentVal || "") + "\n" + code);
+      return;
+    }
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = currentVal || "";
+    const newVal = text.substring(0, start) + code + text.substring(end);
+    
+    setter(newVal);
+    
+    // Maintain focus and set cursor after the inserted snippet
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + code.length, start + code.length);
+    }, 0);
+  }, [reqPreRequestScript, reqPostRequestScript, setReqPreRequestScript, setReqPostRequestScript]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -399,48 +426,60 @@ export function RequestWorkspace({
             )}
 
             {activeWorkspaceTab === "Pre-request" && (
-              <div className="flex-1 flex flex-col h-full bg-background overflow-hidden relative">
-                <div className="absolute inset-0 p-4 font-mono text-[14px] leading-[21px] text-gray-200 pointer-events-none whitespace-pre overflow-hidden" id="req-pre-script-highlight">
-                  {reqPreRequestScript}
+              <div className="flex-1 flex bg-background overflow-hidden relative">
+                <div className="flex-1 flex flex-col relative h-full">
+                  <div className="absolute inset-0 p-4 font-mono text-[14px] leading-[21px] text-gray-200 pointer-events-none whitespace-pre overflow-hidden" id="req-pre-script-highlight">
+                    {reqPreRequestScript}
+                  </div>
+                  <textarea
+                    id="pre-script-textarea"
+                    value={reqPreRequestScript || ""}
+                    onChange={(e) => setReqPreRequestScript(e.target.value)}
+                    placeholder="// Write JavaScript code here. Available API: pm.*"
+                    spellCheck={false}
+                    onScroll={(e) => {
+                      const target = e.currentTarget;
+                      const highlight = document.getElementById("req-pre-script-highlight");
+                      if (highlight) {
+                        highlight.scrollTop = target.scrollTop;
+                        highlight.scrollLeft = target.scrollLeft;
+                      }
+                    }}
+                    className="w-full h-full bg-transparent p-4 text-[14px] font-mono text-transparent caret-white focus:outline-none resize-none leading-[21px] selection:bg-primary/20 relative z-10 whitespace-pre overflow-auto"
+                  />
                 </div>
-                <textarea
-                  value={reqPreRequestScript || ""}
-                  onChange={(e) => setReqPreRequestScript(e.target.value)}
-                  placeholder="// Write JavaScript code here. Available API: pm.*"
-                  spellCheck={false}
-                  onScroll={(e) => {
-                    const target = e.currentTarget;
-                    const highlight = document.getElementById("req-pre-script-highlight");
-                    if (highlight) {
-                      highlight.scrollTop = target.scrollTop;
-                      highlight.scrollLeft = target.scrollLeft;
-                    }
-                  }}
-                  className="w-full h-full bg-transparent p-4 text-[14px] font-mono text-transparent caret-white focus:outline-none resize-none leading-[21px] selection:bg-primary/20 relative z-10 whitespace-pre overflow-auto"
-                />
+                <div className="w-64 border-l border-border bg-surface/5">
+                  <ScriptSnippets onInsert={(code) => insertSnippet(code, "pre")} />
+                </div>
               </div>
             )}
 
             {activeWorkspaceTab === "Tests" && (
-              <div className="flex-1 flex flex-col h-full bg-background overflow-hidden relative">
-                <div className="absolute inset-0 p-4 font-mono text-[14px] leading-[21px] text-gray-200 pointer-events-none whitespace-pre overflow-hidden" id="req-post-script-highlight">
-                  {reqPostRequestScript}
+              <div className="flex-1 flex bg-background overflow-hidden relative">
+                <div className="flex-1 flex flex-col relative h-full">
+                  <div className="absolute inset-0 p-4 font-mono text-[14px] leading-[21px] text-gray-200 pointer-events-none whitespace-pre overflow-hidden" id="req-post-script-highlight">
+                    {reqPostRequestScript}
+                  </div>
+                  <textarea
+                    id="post-script-textarea"
+                    value={reqPostRequestScript || ""}
+                    onChange={(e) => setReqPostRequestScript(e.target.value)}
+                    placeholder="// Write JavaScript code to validate the response. Available API: pm.*"
+                    spellCheck={false}
+                    onScroll={(e) => {
+                      const target = e.currentTarget;
+                      const highlight = document.getElementById("req-post-script-highlight");
+                      if (highlight) {
+                        highlight.scrollTop = target.scrollTop;
+                        highlight.scrollLeft = target.scrollLeft;
+                      }
+                    }}
+                    className="w-full h-full bg-transparent p-4 text-[14px] font-mono text-transparent caret-white focus:outline-none resize-none leading-[21px] selection:bg-primary/20 relative z-10 whitespace-pre overflow-auto"
+                  />
                 </div>
-                <textarea
-                  value={reqPostRequestScript || ""}
-                  onChange={(e) => setReqPostRequestScript(e.target.value)}
-                  placeholder="// Write JavaScript code to validate the response. Available API: pm.*"
-                  spellCheck={false}
-                  onScroll={(e) => {
-                    const target = e.currentTarget;
-                    const highlight = document.getElementById("req-post-script-highlight");
-                    if (highlight) {
-                      highlight.scrollTop = target.scrollTop;
-                      highlight.scrollLeft = target.scrollLeft;
-                    }
-                  }}
-                  className="w-full h-full bg-transparent p-4 text-[14px] font-mono text-transparent caret-white focus:outline-none resize-none leading-[21px] selection:bg-primary/20 relative z-10 whitespace-pre overflow-auto"
-                />
+                <div className="w-64 border-l border-border bg-surface/5">
+                  <ScriptSnippets onInsert={(code) => insertSnippet(code, "post")} />
+                </div>
               </div>
             )}
 
