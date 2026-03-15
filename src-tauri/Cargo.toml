@@ -23,7 +23,7 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.31.0", features = ["bundled"] }
-reqwest = { version = "0.13.2", features = ["json"] }
+reqwest = { version = "0.13.2", features = ["json", "multipart"] }
 mdns-sd = "0.18.2"
 tokio = { version = "1.50.0", features = ["full"] }
 futures = "0.3.32"
@@ -32,4 +32,7 @@ get_if_addrs = "0.5.3"
 local-ip-address = "0.6.10"
 uuid = { version = "1.22.0", features = ["v4"] }
 chrono = "0.4.44"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+base64 = "0.22.1"
 

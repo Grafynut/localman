@@ -2,21 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { History, Search, Trash2, X, RotateCcw, ChevronDown } from "lucide-react";
 import { methodColor } from "../utils";
-
-type HistoryEntry = {
-  id: string;
-  workspace_id: string;
-  request_id: string | null;
-  method: string;
-  url: string;
-  request_headers: string | null;
-  request_body: string | null;
-  status_code: number | null;
-  response_body: string | null;
-  response_headers: string | null;
-  time_ms: number | null;
-  executed_at: string;
-};
+import type { HistoryEntry } from "../types";
 
 type Props = {
   isOpen: boolean;
@@ -66,13 +52,22 @@ export function HistoryPanel({ isOpen, onClose, workspaceId, onRestore }: Props)
     );
   });
 
+  const parseUTCDate = (iso: string) => {
+    // SQLite's CURRENT_TIMESTAMP is "YYYY-MM-DD HH:MM:SS" (UTC)
+    // We need to ensure it's treated as UTC by appending Z and replacing space with T
+    if (!iso.includes('Z') && !iso.includes('+')) {
+      return new Date(`${iso.replace(' ', 'T')}Z`);
+    }
+    return new Date(iso);
+  };
+
   const formatTime = (iso: string) => {
-    const d = new Date(iso);
+    const d = parseUTCDate(iso);
     return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   };
 
   const formatDate = (iso: string) => {
-    const d = new Date(iso);
+    const d = parseUTCDate(iso);
     const today = new Date();
     if (d.toDateString() === today.toDateString()) return "Today";
     const yesterday = new Date();
@@ -188,7 +183,7 @@ export function HistoryPanel({ isOpen, onClose, workspaceId, onRestore }: Props)
                           </span>
                         </div>
                         <div className="flex items-center space-x-3 shrink-0 ml-3">
-                          <span className={`text-[11px] font-bold ${statusColor(entry.status_code)}`}>
+                          <span className={`text-[11px] font-bold ${statusColor(entry.status_code ?? null)}`}>
                             {entry.status_code ?? "—"}
                           </span>
                           <span className="text-[10px] text-muted">

@@ -15,6 +15,8 @@ fn greet(name: &str) -> String {
 #[tokio::main]
 pub async fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // 1. Initialize DB and create tables
@@ -39,6 +41,9 @@ pub async fn run() {
             db::get_workspaces,
             db::create_workspace,
             db::create_folder,
+            db::rename_folder,
+            db::delete_folder,
+            db::duplicate_folder,
             db::get_folders,
             db::update_folder_location,
             db::update_request_location,

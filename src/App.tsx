@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { save, open } from "@tauri-apps/plugin-dialog";
+import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
 import { listen } from "@tauri-apps/api/event";
 import { CollectionsSidebar } from "./components/CollectionsSidebar";
-import { Dialog, PromptDialog, ConfirmDialog } from "./components/Dialog";
+import { PromptDialog, ConfirmDialog } from "./components/Dialog";
 import { RequestWorkspace } from "./components/RequestWorkspace";
 import { ResponsePanel } from "./components/ResponsePanel";
 import { RightInspector } from "./components/RightInspector";
 import { TopBar } from "./components/TopBar";
+import { RequestTabs } from "./components/RequestTabs";
 import { ToastViewport, type ToastMessage } from "./components/ToastViewport";
 import type {
   Collection,
   Folder,
   HttpResponseResult,
-  KeyValuePair,
   ResponseState,
   ResponseTab,
   StoredRequest,
@@ -22,13 +23,19 @@ import type {
   Workspace,
   WorkspaceTab,
   Environment,
+  TabState,
+  HistoryEntry,
+  RunnerStatus,
+  RunnerReport,
+  RunnerResult,
 } from "./types";
+import { CollectionRunnerModal, type RunnerConfig } from "./components/CollectionRunnerModal";
 import {
-  defaultHeaders,
   emptyKeyValueRow,
   generateId,
   headerRowsToObject,
   parseHeadersToRows,
+  parseFormDataToRows,
   resolveVariables,
 } from "./utils";
 import { EnvironmentManager } from "./components/EnvironmentManager";
@@ -39,6 +46,8 @@ import { CodeSnippetModal } from "./components/CodeSnippetModal";
 import { v4 as uuidv4 } from "uuid";
 import { parseCurl, parsePostman } from "./utils";
 import "./App.css";
+import { invoke } from "@tauri-apps/api/core";
+import { executeScript } from "./utils/sandbox";
 
 function App() {
   const LOCAL_USER_ID = "local_user_1";
@@ -53,14 +62,15 @@ function App() {
   const [expandedCollections, setExpandedCollections] = useState<Record<string, boolean>>({});
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [requestsByCollection, setRequestsByCollection] = useState<Record<string, StoredRequest[]>>({});
-  const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
+  
+  // Tab State
+  const [openTabs, setOpenTabs] = useState<TabState[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
   const [isLoadingRequests, setIsLoadingRequests] = useState(false);
-  const [isCreatingRequest, setIsCreatingRequest] = useState(false);
   const [isSavingRequest, setIsSavingRequest] = useState(false);
 
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("Headers");
-  const [respTab, setRespTab] = useState<ResponseTab>("Body");
 
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [activeEnvId, setActiveEnvId] = useState<string | null>(null);
@@ -80,18 +90,21 @@ function App() {
   const [connectedPeerIps, setConnectedPeerIps] = useState<Record<string, boolean>>({});
   const [sharingPeerIp, setSharingPeerIp] = useState<string | null>(null);
 
-  const [reqMethod, setReqMethod] = useState("GET");
-  const [reqUrl, setReqUrl] = useState("/api/v1/users");
-  const [reqBody, setReqBody] = useState(`{\n  "data": "56535353",\n  "users": {\n    "token": "api/v1/users"\n  }\n}`);
-  const [reqParams, setReqParams] = useState<KeyValuePair[]>([emptyKeyValueRow()]);
-  const [reqHeaders, setReqHeaders] = useState<KeyValuePair[]>(defaultHeaders());
-
-  const [reqResponse, setReqResponse] = useState<ResponseState>(null);
   const [isSending, setIsSending] = useState(false);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const syncQueueRef = useRef(Promise.resolve());
   const collectionsRef = useRef<Collection[]>([]);
+  const toastsRef = useRef<ToastMessage[]>([]);
+  const syncQueueRef = useRef(Promise.resolve());
+
+  // Runner State
+  const [isRunnerOpen, setIsRunnerOpen] = useState(false);
+  const [runnerTitle, setRunnerTitle] = useState("");
+  const [runnerRequests, setRunnerRequests] = useState<StoredRequest[]>([]);
+  const [runnerStatus, setRunnerStatus] = useState<RunnerStatus>("idle");
+  const [runnerReport, setRunnerReport] = useState<RunnerReport | null>(null);
+  const runnerStopRef = useRef(false);
+  const runnerPauseRef = useRef(false);
   const activeCollectionIdRef = useRef<string | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
 
@@ -109,7 +122,7 @@ function App() {
     isOpen: false,
     type: "prompt",
     title: "",
-    onConfirm: () => {},
+    onConfirm: () => { },
   });
 
   const localDeviceId = useMemo(() => {
@@ -138,24 +151,171 @@ function App() {
     return requestsByCollection[activeCollectionId] ?? [];
   }, [activeCollectionId, requestsByCollection]);
 
-  const activeRequest = useMemo(
-    () => activeRequests.find((request) => request.id === activeRequestId) ?? null,
-    [activeRequests, activeRequestId],
+  const activeTab = useMemo(
+    () => openTabs.find((tab) => tab.id === activeTabId) ?? null,
+    [openTabs, activeTabId],
   );
 
-  const isDirty = useMemo(() => {
-    if (!activeRequest) return false;
+  const activeRequest = useMemo(() => {
+    if (!activeTab) return null;
+    return activeRequests.find((r) => r.id === activeTab.requestId) ?? null;
+  }, [activeTab, activeRequests]);
 
-    const currentHeadersObj = headerRowsToObject(reqHeaders);
+  const showToast = useCallback((toast: Omit<ToastMessage, "id">) => {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    const newToast = { id, ...toast };
+    toastsRef.current = [...toastsRef.current, newToast];
+    setToasts(toastsRef.current); // Trigger re-render
+
+    setTimeout(() => {
+      toastsRef.current = toastsRef.current.filter((item) => item.id !== id);
+      setToasts(toastsRef.current); // Trigger re-render
+    }, 3800);
+  }, []);
+
+  async function handleExportWorkspace() {
+    try {
+      const workspaceData = {
+        collections,
+        folders: foldersByCollection,
+        requests: requestsByCollection,
+        environments,
+      };
+
+      const path = await save({
+        filters: [{
+          name: 'Workspace JSON',
+          extensions: ['json']
+        }],
+        defaultPath: "devcollab-workspace.json"
+      });
+
+      if (!path) return;
+
+      await writeTextFile(path, JSON.stringify(workspaceData, null, 2));
+
+      showToast({
+        kind: "success",
+        title: "Workspace Exported",
+        description: `Successfully exported to ${path}`,
+      });
+    } catch (err) {
+      console.error("Failed to export workspace:", err);
+      showToast({
+        kind: "error",
+        title: "Export Failed",
+        description: String(err),
+      });
+    }
+  }
+
+  async function handleImportWorkspace() {
+    try {
+      const path = await open({
+        filters: [{
+          name: 'Workspace JSON',
+          extensions: ['json']
+        }],
+        multiple: false,
+      });
+
+      if (!path) return;
+
+      const contents = await readTextFile(path as string);
+      const parsed = JSON.parse(contents);
+
+      if (!parsed.collections) {
+        throw new Error("Invalid workspace file format");
+      }
+
+      openConfirm({
+        title: "Import Workspace",
+        description: "This will merge the imported collections, folders, requests, and environments into your current workspace. Do you want to proceed?",
+        confirmLabel: "Import",
+        onConfirm: async () => {
+          try {
+            // Import Collections
+            for (const col of (parsed.collections || [])) {
+              if (!collections.some(c => c.id === col.id)) {
+                await invoke("create_collection", { ...col, workspaceId: activeWorkspaceId, workspace_id: activeWorkspaceId });
+              }
+            }
+
+            // Import Folders
+            for (const [colId, folders] of Object.entries(parsed.folders || {})) {
+              for (const folder of (folders as any[])) {
+                await invoke("create_folder", { ...folder, collectionId: colId });
+              }
+            }
+
+            // Import Requests
+            for (const [colId, requests] of Object.entries(parsed.requests || {})) {
+              for (const req of (requests as any[])) {
+                await invoke("create_request", { ...req, collectionId: colId, collection_id: colId });
+              }
+            }
+
+            // Import Environments
+            for (const env of (parsed.environments || [])) {
+              if (!environments.some(e => e.id === env.id)) {
+                await invoke("create_environment", { ...env, workspaceId: activeWorkspaceId, workspace_id: activeWorkspaceId, isActive: false, is_active: false });
+              }
+            }
+
+            await fetchCollections(activeWorkspaceId);
+            await fetchEnvironments(activeWorkspaceId);
+
+            showToast({
+              kind: "success",
+              title: "Workspace Imported",
+              description: "Successfully merged imported data.",
+            });
+          } catch (importErr) {
+            console.error("Import merge error:", importErr);
+            showToast({
+              kind: "error",
+              title: "Import Failed",
+              description: String(importErr),
+            });
+          }
+        }
+      });
+    } catch (err) {
+      console.error("Failed to import workspace:", err);
+      showToast({
+        kind: "error",
+        title: "Import Failed",
+        description: String(err),
+      });
+    }
+  }
+
+  const isDirty = useMemo(() => {
+    if (!activeTab || !activeRequest) return false;
+
+    const currentHeadersObj = headerRowsToObject(activeTab.headers);
     const savedHeadersObj = activeRequest.headers ? JSON.parse(activeRequest.headers) : {};
 
     return (
-      reqMethod !== activeRequest.method ||
-      reqUrl !== activeRequest.url ||
-      reqBody !== (activeRequest.body || "") ||
-      JSON.stringify(currentHeadersObj) !== JSON.stringify(savedHeadersObj)
+      activeTab.method !== activeRequest.method ||
+      activeTab.url !== activeRequest.url ||
+      (activeTab.body || "") !== (activeRequest.body || "") ||
+      JSON.stringify(currentHeadersObj) !== JSON.stringify(savedHeadersObj) ||
+      (activeTab.preRequestScript || "") !== (activeRequest.pre_request_script || "") ||
+      (activeTab.postRequestScript || "") !== (activeRequest.post_request_script || "")
     );
-  }, [activeRequest, reqMethod, reqUrl, reqBody, reqHeaders]);
+  }, [activeTab, activeRequest]);
+
+  // Update tab dirty state whenever it changes
+  useEffect(() => {
+    if (activeTabId) {
+      setOpenTabs((prev) => 
+        prev.map((tab) => 
+          tab.id === activeTabId ? { ...tab, isDirty } : tab
+        )
+      );
+    }
+  }, [isDirty, activeTabId]);
 
   // Resize handlers
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -188,13 +348,9 @@ function App() {
     };
   }, [isResizing, responseHeight]);
 
-  const workspaceOptions = useMemo(
-    () => Array.from(new Set(collections.map((collection) => collection.name))).filter(Boolean),
-    [collections],
-  );
-
   useEffect(() => {
-    void fetchCollections();
+    // We'll let the activeWorkspaceId useEffect handle the initial fetch
+    // once workspaces are loaded and an active ID is set.
 
     const interval = setInterval(() => {
       invoke<Record<string, string>>("get_known_peers")
@@ -223,6 +379,7 @@ function App() {
   useEffect(() => {
     if (activeWorkspaceId) {
       void fetchEnvironments(activeWorkspaceId);
+      void fetchCollections(activeWorkspaceId);
     }
   }, [activeWorkspaceId]);
 
@@ -239,23 +396,222 @@ function App() {
 
   useEffect(() => {
     if (!activeCollectionId) {
-      setActiveRequestId(null);
-      return;
+      if (openTabs.length === 0) {
+        // No active collection and no tabs, nothing to fetch
+        return;
+      }
     }
-    void fetchRequests(activeCollectionId);
-  }, [activeCollectionId]);
+    if (activeCollectionId) {
+      void fetchRequests(activeCollectionId);
+    }
+  }, [activeCollectionId]); // removed openTabs from deps to prevent infinite loop
 
   useEffect(() => {
     activeCollectionIdRef.current = activeCollectionId;
   }, [activeCollectionId]);
 
   useEffect(() => {
-    activeRequestIdRef.current = activeRequestId;
-  }, [activeRequestId]);
+    activeRequestIdRef.current = activeTab?.requestId ?? null;
+  }, [activeTab?.requestId]);
 
   useEffect(() => {
     collectionsRef.current = collections;
   }, [collections]);
+
+  const handleCreateRequestClick = useCallback(async (collectionIdArg?: string, folderId: string | null = null) => {
+    const collectionId = collectionIdArg || activeCollectionId;
+    if (!collectionId) {
+      showToast({
+        kind: "info",
+        title: "No active collection",
+        description: "Create or select a collection first.",
+      });
+      return;
+    }
+
+    const requestCount = (requestsByCollection[collectionId] || []).filter(r => r.folder_id === folderId).length;
+    openPrompt({
+      title: "New Request",
+      description: "Create a new API request to start testing your endpoints.",
+      defaultValue: `New Request ${requestCount + 1}`,
+      confirmLabel: "Create Request",
+      onConfirm: async (name) => {
+        if (!name.trim()) return;
+        try {
+          const requestId = generateId();
+          const created = await invoke<StoredRequest>("create_request", {
+            id: requestId,
+            collectionId,
+            collection_id: collectionId,
+            folderId,
+            folder_id: folderId,
+            name: name.trim(),
+            method: "GET", // Default method
+            url: "", // Default URL
+            headers: null, // Default headers
+            body: null, // Default body
+            params: null, // Default params
+            position: requestCount + 1
+          });
+
+          setRequestsByCollection((prev) => {
+            const current = prev[collectionId] || [];
+            return { ...prev, [collectionId]: [...current, created] };
+          });
+          setExpandedCollections((prev) => ({ ...prev, [collectionId]: true }));
+          if (folderId) {
+            setExpandedFolders((prev) => ({ ...prev, [folderId]: true }));
+          }
+          setActiveCollectionId(collectionId);
+          applyStoredRequest(created);
+          void broadcastSyncEvent("Create", "Request", created.id, created);
+          showToast({
+            kind: "success",
+            title: "Request created",
+            description: `${created.method} ${created.name}`,
+          });
+        } catch (error) {
+          showToast({
+            kind: "error",
+            title: "Error creating request",
+            description: String(error),
+          });
+        }
+      }
+    });
+  }, [activeCollectionId, requestsByCollection, showToast, broadcastSyncEvent, applyStoredRequest]);
+
+  const handleRunCollection = (collection: Collection) => {
+    const colReqs = requestsByCollection[collection.id] || [];
+    setRunnerTitle(collection.name);
+    setRunnerRequests(colReqs);
+    setRunnerReport(null);
+    setRunnerStatus("idle");
+    setIsRunnerOpen(true);
+  };
+
+  const handleRunFolder = (folder: Folder) => {
+    const folderReqs = (requestsByCollection[folder.collection_id] || []).filter(r => r.folder_id === folder.id);
+    setRunnerTitle(folder.name);
+    setRunnerRequests(folderReqs);
+    setRunnerReport(null);
+    setRunnerStatus("idle");
+    setIsRunnerOpen(true);
+  };
+
+  const executeCollectionRun = async (config: RunnerConfig) => {
+    setRunnerStatus("running");
+    runnerStopRef.current = false;
+    runnerPauseRef.current = false;
+    
+    const results: RunnerResult[] = [];
+    let totalTime = 0;
+    let passedCount = 0;
+    let failedCount = 0;
+
+    const runRequests = runnerRequests.filter(r => config.requestIds.includes(r.id));
+    
+    for (let i = 0; i < config.iterations; i++) {
+      for (const req of runRequests) {
+        if (runnerStopRef.current) break;
+        while (runnerPauseRef.current) {
+          await new Promise(r => setTimeout(r, 100));
+          if (runnerStopRef.current) break;
+        }
+        if (runnerStopRef.current) break;
+
+        try {
+          const runEnv = environments.find(e => e.id === config.environmentId) || null;
+          const envVars = runEnv ? JSON.parse(runEnv.variables) : {};
+          const headers = req.headers ? JSON.parse(req.headers) : {};
+
+          const res = await invoke<HttpResponseResult>("execute_request", {
+            params: {
+              method: req.method,
+              url: resolveVariables(req.url, envVars),
+              headers: headers,
+              body: req.body,
+              body_type: req.body_type || "none",
+              form_data: req.form_data ? JSON.parse(req.form_data) : [],
+              binary_file_path: req.binary_file_path,
+            }
+          });
+
+          let tests: any[] = [];
+          let passed = true;
+          if (req.post_request_script) {
+             const context = {
+               environment: envVars,
+               request: {
+                 url: req.url,
+                 method: req.method,
+                 headers: headers,
+                 body: req.body || null,
+               },
+               response: {
+                 status: res.status,
+                 body: res.body,
+                 headers: res.headers || {},
+               }
+             };
+             const scriptRes = executeScript(req.post_request_script, context);
+             tests = scriptRes.testResults || [];
+             passed = tests.every(t => t.passed);
+          }
+
+          const result: RunnerResult = {
+            requestId: req.id,
+            name: req.name,
+            method: req.method,
+            url: req.url,
+            status: res.status,
+            time_ms: res.time_ms,
+            testResults: tests,
+            passed: passed
+          };
+
+          results.push(result);
+          if (passed) passedCount++; else failedCount++;
+          totalTime += res.time_ms;
+
+          setRunnerReport({
+            totalRequests: results.length,
+            passedRequests: passedCount,
+            failedRequests: failedCount,
+            totalTime,
+            results: [...results]
+          });
+
+          if (config.delay > 0) {
+            await new Promise(r => setTimeout(r, config.delay));
+          }
+        } catch (err: any) {
+          results.push({
+            requestId: req.id,
+            name: req.name,
+            method: req.method,
+            url: req.url,
+            status: 0,
+            time_ms: 0,
+            testResults: [],
+            passed: false,
+            error: String(err)
+          });
+          failedCount++;
+          setRunnerReport({
+            totalRequests: results.length,
+            passedRequests: passedCount,
+            failedRequests: failedCount,
+            totalTime,
+            results: [...results]
+          });
+        }
+      }
+      if (runnerStopRef.current) break;
+    }
+
+    setRunnerStatus(runnerStopRef.current ? "stopped" : "completed");
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -341,10 +697,72 @@ function App() {
   }, []);
 
   function applyStoredRequest(request: StoredRequest) {
-    setReqMethod(request.method || "GET");
-    setReqUrl(request.url || "");
-    setReqBody(request.body || "");
-    setReqHeaders(parseHeadersToRows(request.headers));
+    // Check if a tab for this request already exists
+    const existingTab = openTabs.find(t => t.requestId === request.id);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+      return;
+    }
+
+    const newTab: TabState = {
+      id: generateId(),
+      requestId: request.id,
+      name: request.name,
+      method: request.method || "GET",
+      url: request.url || "",
+      body: request.body || "",
+      headers: parseHeadersToRows(request.headers),
+      params: [emptyKeyValueRow()], // Initialize or parse params if added later
+      isDirty: false,
+      preRequestScript: request.pre_request_script || null,
+      postRequestScript: request.post_request_script || null,
+      bodyType: (request.body_type as any) || "raw",
+      formData: parseFormDataToRows(request.form_data),
+      binaryFilePath: request.binary_file_path || null,
+    };
+
+    setOpenTabs(prev => [...prev, newTab]);
+    setActiveTabId(newTab.id);
+  }
+
+  function handleTabSelect(tabId: string) {
+    setActiveTabId(tabId);
+  }
+
+  function handleTabClose(tabId: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    const tabToClose = openTabs.find(t => t.id === tabId);
+    if (!tabToClose) return;
+
+    if (tabToClose.isDirty) {
+      openConfirm({
+        title: "Close Unsaved Tab?",
+        description: `You have unsaved changes in "${tabToClose.name}". Are you sure you want to close it and lose these changes?`,
+        confirmLabel: "Close Tab",
+        isDestructive: true,
+        onConfirm: () => {
+          closeTabCore(tabId);
+        }
+      });
+    } else {
+      closeTabCore(tabId);
+    }
+  }
+
+  function closeTabCore(tabId: string) {
+    setOpenTabs(prev => {
+      const remaining = prev.filter(t => t.id !== tabId);
+      if (activeTabId === tabId) {
+        // If we closed the active tab, switch to the last available tab (or null)
+        const nextActive = remaining.length > 0 ? remaining[remaining.length - 1].id : null;
+        setActiveTabId(nextActive);
+      }
+      return remaining;
+    });
+  }
+
+  function handleNewTab() {
+    handleCreateRequestClick();
   }
 
   function toggleCollectionExpanded(id: string) {
@@ -411,10 +829,9 @@ function App() {
         [collectionId!]: [...(prev[collectionId!] || []), newRequest],
       }));
 
-      setActiveRequestId(requestId);
       applyStoredRequest(newRequest);
       void broadcastSyncEvent("Create", "Request", requestId, newRequest);
-      
+
       showToast({ kind: "success", title: "cURL Imported", description: "Request created successfully" });
       setIsImportModalOpen(false);
     } catch (error) {
@@ -433,6 +850,10 @@ function App() {
           workspace_id: activeWorkspaceId,
         });
         setCollections((prev) => [...prev, createdCol]);
+        if (collections.length === 0 || !activeCollectionId) {
+          setExpandedCollections((prev) => ({ ...prev, [createdCol.id]: true }));
+          setActiveCollectionId(createdCol.id);
+        }
         void broadcastSyncEvent("Create", "Collection", createdCol.id, createdCol);
 
         // Import folders for this collection
@@ -467,7 +888,7 @@ function App() {
           });
           void broadcastSyncEvent("Create", "Request", req.id, req);
         }
-        
+
         // Refresh local state for this collection
         await fetchRequests(createdCol.id);
         setExpandedCollections(prev => ({ ...prev, [createdCol.id]: true }));
@@ -480,14 +901,6 @@ function App() {
       showToast({ kind: "error", title: "Import Failed", description: String(error) });
     }
   }
-
-  const showToast = useCallback((toast: Omit<ToastMessage, "id">) => {
-    const id = Date.now() + Math.floor(Math.random() * 1000);
-    setToasts((prev) => [...prev, { id, ...toast }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((item) => item.id !== id));
-    }, 3800);
-  }, []);
 
   function connectedPeerList() {
     return Object.entries(connectedPeerIps)
@@ -623,7 +1036,8 @@ function App() {
         });
         if (activeCollectionIdRef.current === event.entity_id) {
           setActiveCollectionId(null);
-          setActiveRequestId(null);
+          // If we want to close tabs for this collection, we could do it here
+          setOpenTabs((prev) => prev.filter((t) => !requestsByCollection[event.entity_id]?.some(r => r.id === t.requestId)));
         }
         return;
       }
@@ -682,8 +1096,10 @@ function App() {
           });
           return next;
         });
-        if (activeRequestIdRef.current === event.entity_id) {
-          setActiveRequestId(null);
+        if (activeTab?.requestId === event.entity_id) {
+          // If the currently viewed request was deleted, maybe close its tab
+          const tabToClose = openTabs.find(t => t.requestId === event.entity_id);
+          if (tabToClose) closeTabCore(tabToClose.id);
         }
         return;
       }
@@ -738,17 +1154,10 @@ function App() {
         nextCollectionRequests[idx] = upserted;
         return { ...prev, [upserted.collection_id]: nextCollectionRequests };
       });
-      if (activeRequestIdRef.current === upserted.id) {
-        applyStoredRequest(upserted);
+      if (activeTab?.requestId === upserted.id) {
+        // Update the tab state if it was modified externally? This is tricky with ephemeral edits.
+        // For now, let's just update the cached request and let the user's edits take precedence
       }
-    }
-  }
-
-  async function readTextFromClipboard() {
-    try {
-      return await navigator.clipboard.readText();
-    } catch {
-      return "";
     }
   }
 
@@ -769,7 +1178,7 @@ function App() {
   }
 
   async function readClipboardPayload() {
-    const text = await readTextFromClipboard();
+    const text = await navigator.clipboard.readText();
     if (text.trim()) {
       return { text, source: "system" as const };
     }
@@ -896,11 +1305,13 @@ function App() {
     return directRequest ? [directRequest] : [];
   }
 
-  async function fetchCollections() {
+  async function fetchCollections(workspaceId?: string) {
+    const targetWsId = workspaceId || activeWorkspaceId;
+    if (!targetWsId) return;
+
     try {
       const result = await invoke<Collection[]>("get_collections", {
-        ownerId: LOCAL_USER_ID,
-        owner_id: LOCAL_USER_ID,
+        workspace_id: targetWsId,
       });
 
       setCollections(result);
@@ -1019,13 +1430,8 @@ function App() {
 
       setRequestsByCollection((prev) => ({ ...prev, [collectionId]: requests }));
 
-      if (requests.length === 0) {
-        setActiveRequestId(null);
-        return;
-      }
-
-      if (!activeRequestId || !requests.some((request) => request.id === activeRequestId)) {
-        setActiveRequestId(requests[0].id);
+      // Optional: automatically open the first request if no tabs are open
+      if (requests.length > 0 && openTabs.length === 0) {
         applyStoredRequest(requests[0]);
       }
     } catch (error) {
@@ -1045,11 +1451,11 @@ function App() {
   };
 
   const openConfirm = (config: Omit<typeof dialogState, "isOpen" | "type" | "onConfirm"> & { onConfirm: () => void }) => {
-    setDialogState({ 
-      ...config, 
-      isOpen: true, 
-      type: "confirm", 
-      onConfirm: config.onConfirm 
+    setDialogState({
+      ...config,
+      isOpen: true,
+      type: "confirm",
+      onConfirm: config.onConfirm
     } as any);
   };
 
@@ -1080,12 +1486,12 @@ function App() {
       if (sourceCollectionId && sourceCollectionId !== targetCollectionId) {
         await fetchRequests(sourceCollectionId);
       }
-      
-      void broadcastSyncEvent("Update", "Request", requestId, { 
-        id: requestId, 
-        collection_id: targetCollectionId, 
-        folder_id: targetFolderId, 
-        position: targetPosition 
+
+      void broadcastSyncEvent("Update", "Request", requestId, {
+        id: requestId,
+        collection_id: targetCollectionId,
+        folder_id: targetFolderId,
+        position: targetPosition
       });
 
       showToast({
@@ -1170,7 +1576,6 @@ function App() {
           setRequestsByCollection((prev) => ({ ...prev, [newCollection.id]: [] }));
           setExpandedCollections((prev) => ({ ...prev, [newCollection.id]: true }));
           setActiveCollectionId(newCollection.id);
-          setActiveRequestId(null);
           void broadcastSyncEvent("Create", "Collection", newCollection.id, newCollection);
           showToast({
             kind: "success",
@@ -1231,7 +1636,6 @@ function App() {
           setCollections((prev) => [...prev, duplicated]);
           setExpandedCollections((prev) => ({ ...prev, [duplicated.id]: true }));
           setActiveCollectionId(duplicated.id);
-          setActiveRequestId(null);
           await fetchRequests(duplicated.id);
           void broadcastSyncEvent("Create", "Collection", duplicated.id, duplicated);
           const duplicatedRequests = await invoke<StoredRequest[]>("get_requests_by_collection", {
@@ -1282,7 +1686,6 @@ function App() {
           if (activeCollectionId === collection.id) {
             const nextActive = nextCollections[0]?.id ?? null;
             setActiveCollectionId(nextActive);
-            setActiveRequestId(null);
           }
           void broadcastSyncEvent("Delete", "Collection", collection.id, {
             id: collection.id,
@@ -1290,6 +1693,47 @@ function App() {
           showToast({ kind: "success", title: "Collection deleted", description: collection.name });
         } catch (error) {
           showToast({ kind: "error", title: "Error deleting collection", description: String(error) });
+        }
+      }
+    });
+  }
+
+  async function handleDuplicateFolder(folder: Folder) {
+    openPrompt({
+      title: "Duplicate Folder",
+      description: "A copy of the folder and its requests will be created.",
+      defaultValue: `${folder.name} Copy`,
+      confirmLabel: "Duplicate",
+      onConfirm: async (name) => {
+        if (!name.trim()) return;
+        const newId = uuidv4();
+        try {
+          const duplicated = await invoke<Folder>("duplicate_folder", {
+            sourceId: folder.id,
+            source_id: folder.id,
+            newId,
+            new_id: newId,
+            newName: name.trim(),
+            new_name: name.trim(),
+          });
+          setFoldersByCollection((prev) => ({
+            ...prev,
+            [duplicated.collection_id]: [...(prev[duplicated.collection_id] || []), duplicated]
+          }));
+          setExpandedFolders((prev) => ({ ...prev, [duplicated.id]: true }));
+          
+          await fetchRequests(duplicated.collection_id);
+          showToast({
+            kind: "success",
+            title: "Folder duplicated",
+            description: duplicated.name,
+          });
+        } catch (error) {
+          showToast({
+            kind: "error",
+            title: "Error duplicating folder",
+            description: String(error),
+          });
         }
       }
     });
@@ -1357,72 +1801,6 @@ function App() {
     }
   }
 
-  async function handleCreateRequestClick(collectionIdArg?: string, folderId: string | null = null) {
-    const collectionId = collectionIdArg || activeCollectionId;
-    if (!collectionId) {
-      showToast({
-        kind: "info",
-        title: "No active collection",
-        description: "Create or select a collection first.",
-      });
-      return;
-    }
-
-    const requestCount = (requestsByCollection[collectionId] || []).filter(r => r.folder_id === folderId).length;
-    openPrompt({
-      title: "New Request",
-      description: "Create a new API request to start testing your endpoints.",
-      defaultValue: `New Request ${requestCount + 1}`,
-      confirmLabel: "Create Request",
-      onConfirm: async (name) => {
-        if (!name.trim()) return;
-        setIsCreatingRequest(true);
-        try {
-          const headers = headerRowsToObject(reqHeaders);
-          const created = await invoke<StoredRequest>("create_request", {
-            id: uuidv4(),
-            collectionId,
-            collection_id: collectionId,
-            folderId,
-            folder_id: folderId,
-            name: name.trim(),
-            method: reqMethod,
-            url: reqUrl,
-            headers: Object.keys(headers).length > 0 ? JSON.stringify(headers) : null,
-            body: reqBody || null,
-            position: requestCount + 1
-          });
-
-          setRequestsByCollection((prev) => {
-            const current = prev[collectionId] || [];
-            return { ...prev, [collectionId]: [...current, created] };
-          });
-          setExpandedCollections((prev) => ({ ...prev, [collectionId]: true }));
-          if (folderId) {
-            setExpandedFolders((prev) => ({ ...prev, [folderId]: true }));
-          }
-          setActiveCollectionId(collectionId);
-          setActiveRequestId(created.id);
-          applyStoredRequest(created);
-          void broadcastSyncEvent("Create", "Request", created.id, created);
-          showToast({
-            kind: "success",
-            title: "Request created",
-            description: `${created.method} ${created.name}`,
-          });
-        } catch (error) {
-          showToast({
-            kind: "error",
-            title: "Error creating request",
-            description: String(error),
-          });
-        } finally {
-          setIsCreatingRequest(false);
-        }
-      }
-    });
-  }
-
   async function handleRenameRequest(request: StoredRequest) {
     openPrompt({
       title: "Rename Request",
@@ -1442,9 +1820,10 @@ function App() {
               [updated.collection_id]: current.map((item) => (item.id === updated.id ? updated : item)),
             };
           });
-          if (activeRequestId === updated.id) {
-            setActiveRequestId(updated.id);
-          }
+          // Update active tab name if this request is open
+          setOpenTabs(prev => prev.map(tab =>
+            tab.requestId === updated.id ? { ...tab, name: updated.name } : tab
+          ));
           void broadcastSyncEvent("Update", "Request", updated.id, updated);
           showToast({ kind: "success", title: "Request renamed", description: updated.name });
         } catch (error) {
@@ -1477,7 +1856,6 @@ function App() {
           });
           setExpandedCollections((prev) => ({ ...prev, [duplicated.collection_id]: true }));
           setActiveCollectionId(duplicated.collection_id);
-          setActiveRequestId(duplicated.id);
           applyStoredRequest(duplicated);
           void broadcastSyncEvent("Create", "Request", duplicated.id, duplicated);
           showToast({
@@ -1505,13 +1883,18 @@ function App() {
           const remaining = current.filter((item) => item.id !== request.id);
           setRequestsByCollection((prev) => ({ ...prev, [request.collection_id]: remaining }));
 
-          if (activeRequestId === request.id) {
-            const nextActive = remaining[0] || null;
-            setActiveRequestId(nextActive?.id || null);
-            if (nextActive) {
-              applyStoredRequest(nextActive);
+          // Close all tabs associated with this request
+          setOpenTabs(tabs => {
+            const nextTabs = tabs.filter(t => t.requestId !== request.id);
+            if (nextTabs.length !== tabs.length) {
+                // We closed at least one tab. If activeTabId was closed, select the last one.
+                if (!nextTabs.find(t => t.id === activeTabId)) {
+                    setActiveTabId(nextTabs.length > 0 ? nextTabs[nextTabs.length - 1].id : null);
+                }
             }
-          }
+            return nextTabs;
+          });
+
           void broadcastSyncEvent("Delete", "Request", request.id, {
             id: request.id,
             collection_id: request.collection_id,
@@ -1629,7 +2012,6 @@ function App() {
           setRequestsByCollection((prev) => ({ ...prev, [createdCollection.id]: [] }));
           setExpandedCollections((prev) => ({ ...prev, [createdCollection.id]: true }));
           setActiveCollectionId(createdCollection.id);
-          setActiveRequestId(null);
 
           const requestsToCreate = getClipboardRequests(parsed);
           let createdCount = 0;
@@ -1739,7 +2121,6 @@ function App() {
       setExpandedCollections((prev) => ({ ...prev, [collectionId]: true }));
       setActiveCollectionId(collectionId);
       if (lastCreated) {
-        setActiveRequestId(lastCreated.id);
         applyStoredRequest(lastCreated);
       }
       createdRequests.forEach((request) => {
@@ -1760,61 +2141,151 @@ function App() {
   }
 
   async function handleSendRequest() {
-    if (!reqUrl.trim()) {
+    if (!activeTab || !activeTab.url.trim()) {
       return;
     }
 
     setIsSending(true);
-    setReqResponse(null);
-    setRespTab("Body");
+    setIsSending(true);
+    setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, lastResponse: null, lastRespTab: "Body" } : t));
 
     // Resolve Environments
     const activeEnv = environments.find(e => e.id === activeEnvId);
-    let envData: Record<string, string> = {};
+    let originalEnvData: Record<string, string> = {};
     if (activeEnv) {
       try {
-        envData = JSON.parse(activeEnv.variables);
+        originalEnvData = JSON.parse(activeEnv.variables);
       } catch (err) {
         console.error("Failed to parse environment variables:", err);
       }
     }
 
-    const headers = headerRowsToObject(reqHeaders);
+    const headers = headerRowsToObject(activeTab.headers);
     const resolvedHeaders: Record<string, string> = {};
     Object.entries(headers).forEach(([k, v]) => {
-      resolvedHeaders[k] = resolveVariables(v, envData);
+      resolvedHeaders[k] = resolveVariables(v, originalEnvData);
     });
 
-    let finalUrl = resolveVariables(reqUrl, envData);
+    let finalUrl = resolveVariables(activeTab.url, originalEnvData);
     if (!finalUrl.startsWith("http")) {
       finalUrl = `https://jsonplaceholder.typicode.com${finalUrl.startsWith("/") ? finalUrl : `/${finalUrl}`}`;
     }
 
     const queryParams = new URLSearchParams();
-    reqParams.forEach((param) => {
+    activeTab.params.forEach((param) => {
       if (param.enabled && param.key.trim()) {
-        queryParams.append(param.key.trim(), resolveVariables(param.value, envData));
+        queryParams.append(param.key.trim(), resolveVariables(param.value, originalEnvData));
       }
     });
 
-    const queryString = queryParams.toString();
+    let queryString = queryParams.toString();
     if (queryString) {
       finalUrl += finalUrl.includes("?") ? `&${queryString}` : `?${queryString}`;
     }
 
-    const resolvedBody = reqBody ? resolveVariables(reqBody, envData) : null;
+    let resolvedBody = activeTab.body ? resolveVariables(activeTab.body, originalEnvData) : null;
+
+    // Build context for pre-request script
+    const preContext = {
+      environment: { ...originalEnvData },
+      request: {
+        url: finalUrl,
+        method: activeTab.method,
+        headers: resolvedHeaders,
+        body: resolvedBody,
+      }
+    };
+
+    // Execute Pre-request Script
+    let envData = { ...originalEnvData };
+    if (activeTab.preRequestScript) {
+      const preResult = executeScript(activeTab.preRequestScript, preContext);
+      if (preResult.error) {
+        console.error("Pre-request script error:", preResult.error);
+        showToast({
+          kind: "error",
+          title: "Pre-request Script Error",
+          description: preResult.error,
+        });
+        // Continue execution but warn the user
+      }
+      envData = { ...preResult.environmentMutations };
+      finalUrl = preResult.requestMutations.url;
+      // update headers and body if mutated
+      Object.assign(resolvedHeaders, preResult.requestMutations.headers);
+      resolvedBody = preResult.requestMutations.body;
+
+      // Update active environment if variables changed
+      if (activeEnvId) {
+        const activeEnv = environments.find(e => e.id === activeEnvId);
+        if (activeEnv) {
+          const updatedVariables = JSON.stringify(preResult.environmentMutations);
+          setEnvironments(prev => prev.map(env => 
+            env.id === activeEnvId ? { ...env, variables: updatedVariables } : env
+          ));
+          void invoke("update_environment", {
+            id: activeEnvId,
+            name: activeEnv.name,
+            variables: updatedVariables,
+          });
+        }
+      }
+    }
 
     try {
       const response = await invoke<HttpResponseResult>("execute_request", {
         params: {
-          method: reqMethod,
+          method: activeTab.method,
           url: finalUrl,
           headers: Object.keys(resolvedHeaders).length > 0 ? resolvedHeaders : null,
-          body: reqMethod === "GET" ? null : resolvedBody,
+          body: activeTab.method === "GET" ? null : resolvedBody,
+          body_type: activeTab.bodyType,
+          form_data: activeTab.bodyType === "form-data" ? activeTab.formData.map(entry => ({
+            ...entry,
+            key: resolveVariables(entry.key, originalEnvData),
+            value: entry.type === "text" ? resolveVariables(entry.value, originalEnvData) : entry.value
+          })) : null,
+          binary_file_path: activeTab.bodyType === "binary" ? (activeTab.binaryFilePath ? resolveVariables(activeTab.binaryFilePath, originalEnvData) : null) : null,
         },
       });
-      setReqResponse(response);
-      void saveRequestToHistory(reqMethod, finalUrl, resolvedHeaders, resolvedBody, response);
+
+      // Execute Tests Script
+      let testResults = undefined;
+      let finalResponse = { ...response };
+      if (activeTab.postRequestScript) {
+        const postContext = {
+          environment: { ...envData },
+          request: {
+             url: finalUrl,
+             method: activeTab.method,
+             headers: resolvedHeaders,
+             body: resolvedBody,
+          },
+          response: {
+             status: response.status,
+             body: response.body,
+             headers: response.headers || {},
+          }
+        };
+        const postResult = executeScript(activeTab.postRequestScript, postContext);
+        if (postResult.error) {
+          console.error("Tests script error:", postResult.error);
+          showToast({
+            kind: "error",
+            title: "Tests Script Error",
+            description: postResult.error,
+          });
+        }
+        testResults = postResult.testResults;
+        finalResponse.testResults = testResults;
+      }
+
+      setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { 
+        ...t, 
+        lastResponse: finalResponse,
+        lastRespTab: (testResults && testResults.length > 0) ? "Tests" : (t.lastRespTab || "Body")
+      } : t));
+      void saveRequestToHistory(activeTab.method, finalUrl, resolvedHeaders, resolvedBody, finalResponse, activeTab.bodyType, activeTab.formData, activeTab.binaryFilePath);
     } catch (error) {
       const errResponse = {
         error: String(error),
@@ -1823,8 +2294,8 @@ function App() {
         body: "",
         time_ms: 0,
       };
-      setReqResponse(errResponse);
-      void saveRequestToHistory(reqMethod, finalUrl, resolvedHeaders, resolvedBody, errResponse);
+      setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, lastResponse: errResponse } : t));
+      void saveRequestToHistory(activeTab.method, finalUrl, resolvedHeaders, resolvedBody, errResponse, activeTab.bodyType, activeTab.formData, activeTab.binaryFilePath);
       showToast({
         kind: "error",
         title: "Request failed",
@@ -1835,35 +2306,50 @@ function App() {
     }
   }
 
-  async function saveRequestToHistory(method: string, url: string, headersObj: Record<string, string>, body: string | null, response: any) {
+  async function saveRequestToHistory(method: string, url: string, headersObj: Record<string, string>, body: string | null, response: any, bodyType?: string, formData?: any[], binaryFilePath?: string | null) {
     try {
       await invoke("save_history_entry", {
-        id: generateId(),
-        workspaceId: activeWorkspaceId,
-        requestId: activeRequestId,
-        method,
-        url,
-        requestHeaders: JSON.stringify(headersObj),
-        requestBody: body,
-        statusCode: response?.status ?? null,
-        responseBody: response?.body ?? response?.error ?? null,
-        responseHeaders: response?.headers ? JSON.stringify(response.headers) : null,
-        timeMs: response?.time_ms ?? null,
+        args: {
+          id: generateId(),
+          workspaceId: activeWorkspaceId,
+          requestId: activeTab?.requestId || null,
+          method,
+          url,
+          requestHeaders: JSON.stringify(headersObj),
+          requestBody: body,
+          statusCode: response?.status ?? null,
+          responseBody: response?.body ?? response?.error ?? null,
+          responseHeaders: response?.headers ? JSON.stringify(response.headers) : null,
+          timeMs: response?.time_ms ?? null,
+          testResults: response?.testResults ? JSON.stringify(response.testResults) : null,
+          bodyType: bodyType || "raw",
+          formData: formData ? JSON.stringify(formData) : null,
+          binaryFilePath: binaryFilePath || null,
+        }
       });
     } catch (err) {
       console.error("Failed to save history", err);
     }
   }
 
-  function handleHistoryRestore(entry: { method: string; url: string; request_headers: string | null; request_body: string | null }) {
-    setReqMethod(entry.method);
-    setReqUrl(entry.url);
-    setReqBody(entry.request_body || "");
-    if (entry.request_headers) {
-      try {
-        setReqHeaders(parseHeadersToRows(entry.request_headers));
-      } catch { /* ignore */ }
-    }
+  function handleHistoryRestore(entry: HistoryEntry) {
+    if (!activeTabId) return; // Must have an active tab to restore into
+
+    setOpenTabs(prev => prev.map(tab => {
+        if (tab.id !== activeTabId) return tab;
+        return {
+            ...tab,
+            method: entry.method,
+            url: entry.url,
+            body: entry.request_body || null,
+            headers: entry.request_headers ? parseHeadersToRows(entry.request_headers) : tab.headers,
+            bodyType: (entry.body_type as any) || "raw",
+            formData: parseFormDataToRows(entry.form_data),
+            binaryFilePath: entry.binary_file_path || null,
+            isDirty: true
+        };
+    }));
+    
     showToast({ kind: "success", title: "Request Restored", description: `${entry.method} ${entry.url}` });
   }
 
@@ -1877,21 +2363,26 @@ function App() {
       return;
     }
 
-    if (!activeRequestId) {
+    if (!activeTab || !activeTab.requestId) { // Check for activeTab.requestId instead of activeRequest
       await handleCreateRequestClick();
       return;
     }
 
     setIsSavingRequest(true);
     try {
-      const headers = headerRowsToObject(reqHeaders);
+      const headers = headerRowsToObject(activeTab.headers);
       const updated = await invoke<StoredRequest>("update_request", {
-        id: activeRequestId,
-        name: activeRequest?.name || "Untitled Request",
-        method: reqMethod,
-        url: reqUrl,
+        id: activeTab.requestId,
+        name: activeTab.name || "Untitled Request",
+        method: activeTab.method,
+        url: activeTab.url,
         headers: Object.keys(headers).length > 0 ? JSON.stringify(headers) : null,
-        body: reqBody || null,
+        body: activeTab.body || null,
+        pre_request_script: activeTab.preRequestScript || null,
+        post_request_script: activeTab.postRequestScript || null,
+        body_type: activeTab.bodyType,
+        form_data: JSON.stringify(activeTab.formData.filter(row => row.key.trim() || row.value.trim())),
+        binary_file_path: activeTab.binaryFilePath,
       });
 
       setRequestsByCollection((prev) => {
@@ -1996,19 +2487,19 @@ function App() {
             collections={collections}
             foldersByCollection={foldersByCollection}
             activeCollectionId={activeCollectionId}
-            setActiveCollectionId={setActiveCollectionId}
+            setActiveCollectionId={(id) => setActiveCollectionId(id)}
             expandedCollections={expandedCollections}
-            toggleCollectionExpanded={toggleCollectionExpanded}
+            toggleCollectionExpanded={(id) => toggleCollectionExpanded(id)}
             expandedFolders={expandedFolders}
-            toggleFolderExpanded={toggleFolderExpanded}
+            toggleFolderExpanded={(id) => toggleFolderExpanded(id)}
             requestsByCollection={requestsByCollection}
-            activeRequestId={activeRequestId}
+            activeRequestId={activeTab?.requestId ?? null}
             activeRequestIsDirty={isDirty}
             onSelectRequest={(request) => {
-              setActiveRequestId(request.id);
               applyStoredRequest(request);
             }}
-            onCreateCollection={handleCreateCollectionClick}
+            onCreateCollection={() => handleCreateCollectionClick()}
+
             onCreateFolder={(collectionId) => {
               openPrompt({
                 title: "New Folder",
@@ -2073,16 +2564,20 @@ function App() {
                       ...prev,
                       [folder.collection_id]: (prev[folder.collection_id] || []).filter(f => f.id !== folder.id)
                     }));
-                    setRequestsByCollection(prev => ({
-                      ...prev,
-                      [folder.collection_id]: (prev[folder.collection_id] || []).filter(r => r.folder_id !== folder.id)
-                    }));
+                    setRequestsByCollection((prev) => {
+                      const current = prev[folder.collection_id] || [];
+                      return {
+                        ...prev,
+                        [folder.collection_id]: current.filter(r => r.folder_id !== folder.id)
+                      };
+                    });
                   } catch (err) {
                     console.error("Failed to delete folder:", err);
                   }
                 }
               });
             }}
+            onDuplicateFolder={handleDuplicateFolder}
             onMoveFolder={handleMoveFolder}
             onMoveRequest={handleMoveRequest}
             onCopyRequest={handleCopyRequest}
@@ -2090,37 +2585,57 @@ function App() {
             onRenameRequest={handleRenameRequest}
             onDuplicateRequest={handleDuplicateRequest}
             onDeleteRequest={handleDeleteRequest}
-            onImport={() => setIsImportModalOpen(true)}
+            onExportWorkspace={handleExportWorkspace}
+            onImportWorkspace={handleImportWorkspace}
             onHistory={() => setIsHistoryOpen(true)}
+            onRunCollection={handleRunCollection}
+            onRunFolder={handleRunFolder}
             isLoadingRequests={isLoadingRequests}
-            isCreatingRequest={isCreatingRequest}
             peersCount={peersCount}
           />
         )}
 
         <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#1e1e1e]">
+          {openTabs.length > 0 && (
+            <RequestTabs
+              tabs={openTabs}
+              activeTabId={activeTabId}
+              onTabSelect={handleTabSelect}
+              onTabClose={handleTabClose}
+              onNewTab={handleNewTab}
+            />
+          )}
+          
           <RequestWorkspace
             activeCollectionName={activeCollection?.name || ""}
-            activeRequestName={activeRequest?.name || ""}
+            activeRequestName={activeTab?.name || ""}
             isDirty={isDirty}
-            isCreatingRequest={isCreatingRequest}
             isSavingRequest={isSavingRequest}
-            onCreateRequest={() => {
-              void handleCreateRequestClick();
-            }}
+            onCreateRequest={() => void handleCreateRequestClick()}
             onSaveRequest={() => {
               void handleSaveRequest();
             }}
-            reqMethod={reqMethod}
-            setReqMethod={setReqMethod}
-            reqUrl={reqUrl}
-            setReqUrl={setReqUrl}
-            reqBody={reqBody}
-            setReqBody={setReqBody}
-            reqParams={reqParams}
-            setReqParams={setReqParams}
-            reqHeaders={reqHeaders}
-            setReqHeaders={setReqHeaders}
+            // Map tab state to RequestWorkspace props
+            reqMethod={activeTab?.method || "GET"}
+            setReqMethod={(m) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, method: typeof m === 'function' ? m(t.method) : m } : t))}
+            reqUrl={activeTab?.url || ""}
+            setReqUrl={(u) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, url: typeof u === 'function' ? u(t.url) : u } : t))}
+            reqBody={activeTab?.body || ""}
+            setReqBody={(b) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, body: typeof b === 'function' ? b(t.body || "") : b } : t))}
+            reqParams={activeTab?.params || []}
+            setReqParams={(p) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, params: typeof p === 'function' ? p(t.params) : p } : t))}
+            reqHeaders={activeTab?.headers || []}
+            setReqHeaders={(h) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, headers: typeof h === 'function' ? h(t.headers) : h } : t))}
+            reqPreRequestScript={activeTab?.preRequestScript || null}
+            setReqPreRequestScript={(s) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, preRequestScript: typeof s === 'function' ? (s as any)(t.preRequestScript) : s } : t))}
+            reqPostRequestScript={activeTab?.postRequestScript || null}
+            setReqPostRequestScript={(s) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, postRequestScript: typeof s === 'function' ? (s as any)(t.postRequestScript) : s } : t))}
+            reqBodyType={activeTab?.bodyType || "raw"}
+            setReqBodyType={(val) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, bodyType: typeof val === 'function' ? (val as any)(t.bodyType) : val } : t))}
+            reqFormData={activeTab?.formData || []}
+            setReqFormData={(val) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, formData: typeof val === 'function' ? (val as any)(t.formData) : val } : t))}
+            reqBinaryFilePath={activeTab?.binaryFilePath || null}
+            setReqBinaryFilePath={(val) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, binaryFilePath: typeof val === 'function' ? (val as any)(t.binaryFilePath) : val } : t))}
             activeWorkspaceTab={activeWorkspaceTab}
             setActiveWorkspaceTab={setActiveWorkspaceTab}
             isSending={isSending}
@@ -2139,10 +2654,10 @@ function App() {
           </div>
 
           <ResponsePanel
-            reqResponse={reqResponse}
+            reqResponse={activeTab?.lastResponse || null}
             isSending={isSending}
-            respTab={respTab}
-            setRespTab={setRespTab}
+            respTab={activeTab?.lastRespTab || "Body"}
+            setRespTab={(tab) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, lastRespTab: typeof tab === 'function' ? (tab as any)(t.lastRespTab || "Body") : tab } : t))}
             height={responseHeight}
             onOpenCode={() => setIsCodeSnippetOpen(true)}
           />
@@ -2185,7 +2700,7 @@ function App() {
         />
       )}
 
-      <EnvironmentManager 
+      <EnvironmentManager
         isOpen={isEnvManagerOpen}
         onClose={() => setIsEnvManagerOpen(false)}
         environments={environments}
@@ -2216,11 +2731,25 @@ function App() {
       <CodeSnippetModal
         isOpen={isCodeSnippetOpen}
         onClose={() => setIsCodeSnippetOpen(false)}
-        method={reqMethod}
-        url={reqUrl}
-        headers={headerRowsToObject(reqHeaders)}
-        body={reqBody}
-        responseBody={reqResponse && "body" in reqResponse ? reqResponse.body : null}
+        method={activeTab?.method || "GET"}
+        url={activeTab?.url || ""}
+        headers={headerRowsToObject(activeTab?.headers || [])}
+        body={activeTab?.body || ""}
+        responseBody={activeTab?.lastResponse && "body" in activeTab.lastResponse ? activeTab.lastResponse.body : null}
+      />
+      <CollectionRunnerModal
+        isOpen={isRunnerOpen}
+        onClose={() => setIsRunnerOpen(false)}
+        title={runnerTitle}
+        requests={runnerRequests}
+        onRun={executeCollectionRun}
+        status={runnerStatus}
+        report={runnerReport}
+        onStop={() => { runnerStopRef.current = true; setRunnerStatus("stopped"); }}
+        onPause={() => { runnerPauseRef.current = true; setRunnerStatus("paused"); }}
+        onResume={() => { runnerPauseRef.current = false; setRunnerStatus("running"); }}
+        environments={environments}
+        activeEnvId={activeEnvId}
       />
     </div>
   );

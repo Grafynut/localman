@@ -18,6 +18,7 @@ pub fn init_db(
         fs::create_dir_all(&app_dir)?;
     }
     let db_path = app_dir.join("devcollab.db");
+    println!("Initializing database at: {:?}", db_path);
     let conn = Connection::open(db_path)?;
 
     // Initialize required SQLite tables
@@ -70,6 +71,11 @@ pub fn init_db(
             body TEXT,
             position INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            pre_request_script TEXT,
+            post_request_script TEXT,
+            body_type TEXT DEFAULT 'raw',
+            form_data TEXT,
+            binary_file_path TEXT,
             FOREIGN KEY(collection_id) REFERENCES collections(id),
             FOREIGN KEY(folder_id) REFERENCES folders(id)
         );
@@ -94,15 +100,45 @@ pub fn init_db(
         );
         "
     )?;
-    
+
     // Migrations: Add missing columns if they don't exist
     // workspace_id for collections
-    let _ = conn.execute("ALTER TABLE collections ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default_workspace'", []);
+    let _ = conn.execute(
+        "ALTER TABLE collections ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default_workspace'",
+        [],
+    );
     // folder_id and position for requests
     let _ = conn.execute("ALTER TABLE requests ADD COLUMN folder_id TEXT", []);
-    let _ = conn.execute("ALTER TABLE requests ADD COLUMN position INTEGER DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE requests ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP", []);
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS environments (
+    let _ = conn.execute(
+        "ALTER TABLE requests ADD COLUMN position INTEGER DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE requests ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE requests ADD COLUMN pre_request_script TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE requests ADD COLUMN post_request_script TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE requests ADD COLUMN body_type TEXT DEFAULT 'raw'",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE requests ADD COLUMN form_data TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE requests ADD COLUMN binary_file_path TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS environments (
         id TEXT PRIMARY KEY,
         workspace_id TEXT,
         collection_id TEXT,
@@ -112,9 +148,14 @@ pub fn init_db(
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
         FOREIGN KEY(collection_id) REFERENCES collections(id)
-    )", []);
+    )",
+        [],
+    );
 
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS request_history (
+
+    
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS request_history (
         id TEXT PRIMARY KEY,
         workspace_id TEXT NOT NULL,
         request_id TEXT,
@@ -127,7 +168,25 @@ pub fn init_db(
         response_headers TEXT,
         time_ms INTEGER,
         executed_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )", []);
+    )",
+        [],
+    );
+
+    // Migration for request_history columns (ignores errors if they already exist, but logs them)
+    if let Err(e) = conn.execute("ALTER TABLE request_history ADD COLUMN test_results TEXT", []) {
+        println!("Migration notice (test_results): {}", e);
+    }
+    if let Err(e) = conn.execute("ALTER TABLE request_history ADD COLUMN body_type TEXT", []) {
+        println!("Migration notice (body_type): {}", e);
+    }
+    if let Err(e) = conn.execute("ALTER TABLE request_history ADD COLUMN form_data TEXT", []) {
+        println!("Migration notice (form_data): {}", e);
+    }
+    if let Err(e) = conn.execute("ALTER TABLE request_history ADD COLUMN binary_file_path TEXT", []) {
+        println!("Migration notice (binary_file_path): {}", e);
+    }
+
+    println!("Database initialized successfully");
 
     Ok(conn)
 }
@@ -171,6 +230,11 @@ pub struct StoredRequest {
     pub headers: Option<String>,
     pub body: Option<String>,
     pub position: i32,
+    pub pre_request_script: Option<String>,
+    pub post_request_script: Option<String>,
+    pub body_type: Option<String>,
+    pub form_data: Option<String>,
+    pub binary_file_path: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -186,7 +250,9 @@ pub struct Environment {
 
 fn fetch_collection_by_id(conn: &Connection, id: &str) -> std::result::Result<Collection, String> {
     let mut stmt = conn
-        .prepare("SELECT id, workspace_id, name, owner_id, created_at FROM collections WHERE id = ?1")
+        .prepare(
+            "SELECT id, workspace_id, name, owner_id, created_at FROM collections WHERE id = ?1",
+        )
         .map_err(|e| e.to_string())?;
     let mut rows = stmt.query([id]).map_err(|e| e.to_string())?;
     if let Some(row) = rows.next().map_err(|e| e.to_string())? {
@@ -205,7 +271,7 @@ fn fetch_collection_by_id(conn: &Connection, id: &str) -> std::result::Result<Co
 fn fetch_request_by_id(conn: &Connection, id: &str) -> std::result::Result<StoredRequest, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, collection_id, folder_id, name, method, url, headers, body, position
+            "SELECT id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path
              FROM requests
              WHERE id = ?1",
         )
@@ -222,9 +288,32 @@ fn fetch_request_by_id(conn: &Connection, id: &str) -> std::result::Result<Store
             headers: row.get(6).ok(),
             body: row.get(7).ok(),
             position: row.get(8).unwrap_or_default(),
+            pre_request_script: row.get(9).ok(),
+            post_request_script: row.get(10).ok(),
+            body_type: row.get(11).ok(),
+            form_data: row.get(12).ok(),
+            binary_file_path: row.get(13).ok(),
         })
     } else {
         Err("Request not found".to_string())
+    }
+}
+
+fn fetch_folder_by_id(conn: &Connection, id: &str) -> std::result::Result<Folder, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, collection_id, name, position, created_at FROM folders WHERE id = ?1")
+        .map_err(|e| e.to_string())?;
+    let mut rows = stmt.query([id]).map_err(|e| e.to_string())?;
+    if let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        Ok(Folder {
+            id: row.get(0).unwrap_or_default(),
+            collection_id: row.get(1).unwrap_or_default(),
+            name: row.get(2).unwrap_or_default(),
+            position: row.get(3).unwrap_or_default(),
+            created_at: row.get(4).unwrap_or_default(),
+        })
+    } else {
+        Err("Folder not found".to_string())
     }
 }
 
@@ -373,7 +462,7 @@ pub fn duplicate_collection(
 
         let mut stmt = conn
             .prepare(
-                "SELECT name, method, url, headers, body, folder_id, position
+                "SELECT name, method, url, headers, body, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path
                  FROM requests
                  WHERE collection_id = ?1",
             )
@@ -387,18 +476,23 @@ pub fn duplicate_collection(
                     row.get::<_, Option<String>>(3).ok().flatten(),
                     row.get::<_, Option<String>>(4).ok().flatten(),
                     row.get::<_, Option<String>>(5).ok().flatten(),
-                    row.get::<_, i32>(6).unwrap_or_default(),
+                    row.get::<_, Option<String>>(6).unwrap_or_default(),
+                    row.get::<_, Option<String>>(7).ok().flatten(),
+                    row.get::<_, Option<String>>(8).ok().flatten(),
+                    row.get::<_, Option<String>>(9).ok().flatten(),
+                    row.get::<_, Option<String>>(10).ok().flatten(),
+                    row.get::<_, Option<String>>(11).ok().flatten(),
                 ))
             })
             .map_err(|e| e.to_string())?;
 
         for req in req_iter {
-            if let Ok((name, method, url, headers, body, folder_id, position)) = req {
+            if let Ok((name, method, url, headers, body, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path)) = req {
                 let cloned_id = uuid::Uuid::new_v4().to_string();
                 conn.execute(
-                    "INSERT INTO requests (id, collection_id, name, method, url, headers, body, folder_id, position)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                    (&cloned_id, &new_id, &name, &method, &url, &headers, &body, &folder_id, &position),
+                    "INSERT INTO requests (id, collection_id, name, method, url, headers, body, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                    (&cloned_id, &new_id, &name, &method, &url, &headers, &body, &folder_id, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path),
                 )
                 .map_err(|e| e.to_string())?;
             }
@@ -422,12 +516,17 @@ pub fn create_request(
     headers: Option<String>,
     body: Option<String>,
     position: i32,
+    pre_request_script: Option<String>,
+    post_request_script: Option<String>,
+    body_type: Option<String>,
+    form_data: Option<String>,
+    binary_file_path: Option<String>,
 ) -> std::result::Result<StoredRequest, String> {
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         conn.execute(
-            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            (&id, &collection_id, &folder_id, &name, &method, &url, &headers, &body, &position),
+            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            (&id, &collection_id, &folder_id, &name, &method, &url, &headers, &body, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path),
         ).map_err(|e| e.to_string())?;
 
         fetch_request_by_id(conn, &id)
@@ -483,10 +582,10 @@ pub fn create_workspace(
             (&id, &name, &owner_id),
         )
         .map_err(|e| e.to_string())?;
-        
+
         let mut stmt = conn
-        .prepare("SELECT id, name, owner_id, created_at FROM workspaces WHERE id = ?1")
-        .map_err(|e| e.to_string())?;
+            .prepare("SELECT id, name, owner_id, created_at FROM workspaces WHERE id = ?1")
+            .map_err(|e| e.to_string())?;
         let mut rows = stmt.query([&id]).map_err(|e| e.to_string())?;
         if let Some(row) = rows.next().map_err(|e| e.to_string())? {
             Ok(Workspace {
@@ -550,7 +649,7 @@ pub fn update_folder_location(
         let mut stmt = conn
             .prepare("SELECT id FROM folders WHERE collection_id = ?1 AND id != ?2 ORDER BY position ASC, created_at ASC")
             .map_err(|e| e.to_string())?;
-        
+
         let mut folder_ids: Vec<String> = stmt
             .query_map([&collection_id, &id], |row| row.get(0))
             .map_err(|e| e.to_string())?
@@ -566,12 +665,13 @@ pub fn update_folder_location(
             conn.execute(
                 "UPDATE folders SET collection_id = ?1, position = ?2 WHERE id = ?3",
                 (&collection_id, idx as i32, folder_id),
-            ).map_err(|e| e.to_string())?;
+            )
+            .map_err(|e| e.to_string())?;
         }
-        
+
         // 4. Special case: if it was moved from a different collection, we should re-normalize that one too
         // (Optional but good for cleanliness)
-        
+
         Ok(())
     } else {
         Err("Database not initialized".to_string())
@@ -593,22 +693,93 @@ pub fn create_folder(
             (&id, &collection_id, &name, &position),
         )
         .map_err(|e| e.to_string())?;
-        
+
+        fetch_folder_by_id(conn, &id)
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn rename_folder(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    name: String,
+) -> std::result::Result<Folder, String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        conn.execute("UPDATE folders SET name = ?2 WHERE id = ?1", (&id, &name))
+            .map_err(|e| e.to_string())?;
+        fetch_folder_by_id(conn, &id)
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn delete_folder(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> std::result::Result<(), String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        conn.execute("DELETE FROM requests WHERE folder_id = ?1", [&id])
+            .map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM folders WHERE id = ?1", [&id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn duplicate_folder(
+    state: tauri::State<'_, AppState>,
+    source_id: String,
+    new_id: String,
+    new_name: String,
+) -> std::result::Result<Folder, String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        let source = fetch_folder_by_id(conn, &source_id)?;
+        conn.execute(
+            "INSERT INTO folders (id, collection_id, name, position) VALUES (?1, ?2, ?3, ?4)",
+            (&new_id, &source.collection_id, &new_name, &source.position),
+        ).map_err(|e| e.to_string())?;
+
         let mut stmt = conn
-        .prepare("SELECT id, collection_id, name, position, created_at FROM folders WHERE id = ?1")
-        .map_err(|e| e.to_string())?;
-        let mut rows = stmt.query([&id]).map_err(|e| e.to_string())?;
-        if let Some(row) = rows.next().map_err(|e| e.to_string())? {
-            Ok(Folder {
-                id: row.get(0).unwrap_or_default(),
-                collection_id: row.get(1).unwrap_or_default(),
-                name: row.get(2).unwrap_or_default(),
-                position: row.get(3).unwrap_or_default(),
-                created_at: row.get(4).unwrap_or_default(),
-            })
-        } else {
-            Err("Folder created but could not be fetched".to_string())
+            .prepare("SELECT name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path FROM requests WHERE folder_id = ?1")
+            .map_err(|e| e.to_string())?;
+        
+        let req_iter = stmt.query_map([&source_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i32>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, Option<String>>(10)?,
+            ))
+        }).map_err(|e| e.to_string())?;
+
+        for req in req_iter {
+            if let Ok((name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path)) = req {
+                let cloned_req_id = uuid::Uuid::new_v4().to_string();
+                conn.execute(
+                    "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                    (&cloned_req_id, &source.collection_id, Some(&new_id), &name, &method, &url, &headers, &body, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path),
+                ).map_err(|e| e.to_string())?;
+            }
         }
+
+        fetch_folder_by_id(conn, &new_id)
     } else {
         Err("Database not initialized".to_string())
     }
@@ -628,7 +799,7 @@ pub fn update_request_location(
         let mut stmt = conn
             .prepare("SELECT id FROM requests WHERE collection_id = ?1 AND (folder_id IS ?2) AND id != ?3 ORDER BY position ASC, id ASC")
             .map_err(|e| e.to_string())?;
-        
+
         let mut request_ids: Vec<String> = stmt
             .query_map((&collection_id, &folder_id, &id), |row| row.get(0))
             .map_err(|e| e.to_string())?
@@ -646,7 +817,7 @@ pub fn update_request_location(
                 (&collection_id, &folder_id, idx as i32, req_id),
             ).map_err(|e| e.to_string())?;
         }
-        
+
         Ok(())
     } else {
         Err("Database not initialized".to_string())
@@ -662,15 +833,20 @@ pub fn update_request(
     url: String,
     headers: Option<String>,
     body: Option<String>,
+    pre_request_script: Option<String>,
+    post_request_script: Option<String>,
+    body_type: Option<String>,
+    form_data: Option<String>,
+    binary_file_path: Option<String>,
 ) -> std::result::Result<StoredRequest, String> {
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         let affected = conn
             .execute(
                 "UPDATE requests
-                 SET name = ?2, method = ?3, url = ?4, headers = ?5, body = ?6
+                 SET name = ?2, method = ?3, url = ?4, headers = ?5, body = ?6, pre_request_script = ?7, post_request_script = ?8, body_type = ?9, form_data = ?10, binary_file_path = ?11
                  WHERE id = ?1",
-                (&id, &name, &method, &url, &headers, &body),
+                (&id, &name, &method, &url, &headers, &body, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path),
             )
             .map_err(|e| e.to_string())?;
 
@@ -678,30 +854,7 @@ pub fn update_request(
             return Err("Request not found".to_string());
         }
 
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, collection_id, folder_id, name, method, url, headers, body, position
-                 FROM requests
-                 WHERE id = ?1",
-            )
-            .map_err(|e| e.to_string())?;
-        let mut rows = stmt.query([&id]).map_err(|e| e.to_string())?;
-
-        if let Some(row) = rows.next().map_err(|e| e.to_string())? {
-            Ok(StoredRequest {
-                id: row.get(0).unwrap_or_default(),
-                collection_id: row.get(1).unwrap_or_default(),
-                folder_id: row.get::<_, Option<String>>(2).unwrap_or_default(),
-                name: row.get(3).unwrap_or_default(),
-                method: row.get(4).unwrap_or_default(),
-                url: row.get(5).unwrap_or_default(),
-                headers: row.get(6).ok(),
-                body: row.get(7).ok(),
-                position: row.get(8).unwrap_or_default(),
-            })
-        } else {
-            Err("Updated request could not be fetched".to_string())
-        }
+        fetch_request_by_id(conn, &id)
     } else {
         Err("Database not initialized".to_string())
     }
@@ -719,12 +872,17 @@ pub fn upsert_request(
     headers: Option<String>,
     body: Option<String>,
     position: i32,
+    pre_request_script: Option<String>,
+    post_request_script: Option<String>,
+    body_type: Option<String>,
+    form_data: Option<String>,
+    binary_file_path: Option<String>,
 ) -> std::result::Result<StoredRequest, String> {
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         conn.execute(
-            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT(id) DO UPDATE SET
                collection_id = excluded.collection_id,
                folder_id = excluded.folder_id,
@@ -733,8 +891,13 @@ pub fn upsert_request(
                url = excluded.url,
                headers = excluded.headers,
                body = excluded.body,
-               position = excluded.position",
-            (&id, &collection_id, &folder_id, &name, &method, &url, &headers, &body, &position),
+               position = excluded.position,
+               pre_request_script = excluded.pre_request_script,
+               post_request_script = excluded.post_request_script,
+               body_type = excluded.body_type,
+               form_data = excluded.form_data,
+               binary_file_path = excluded.binary_file_path",
+            (&id, &collection_id, &folder_id, &name, &method, &url, &headers, &body, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path),
         )
         .map_err(|e| e.to_string())?;
 
@@ -794,8 +957,8 @@ pub fn duplicate_request(
     if let Some(conn) = lock.as_ref() {
         let source = fetch_request_by_id(conn, &source_id)?;
         conn.execute(
-            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             (
                 &new_id,
                 &source.collection_id,
@@ -806,6 +969,11 @@ pub fn duplicate_request(
                 &source.headers,
                 &source.body,
                 &source.position,
+                &source.pre_request_script,
+                &source.post_request_script,
+                &source.body_type,
+                &source.form_data,
+                &source.binary_file_path,
             ),
         )
         .map_err(|e| e.to_string())?;
@@ -825,7 +993,7 @@ pub fn get_requests_by_collection(
     if let Some(conn) = lock.as_ref() {
         let mut stmt = conn
             .prepare(
-                "SELECT id, collection_id, folder_id, name, method, url, headers, body, position
+                "SELECT id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path
                  FROM requests
                  WHERE collection_id = ?1
                  ORDER BY position ASC",
@@ -844,6 +1012,11 @@ pub fn get_requests_by_collection(
                     headers: row.get(6).ok(),
                     body: row.get(7).ok(),
                     position: row.get(8).unwrap_or_default(),
+                    pre_request_script: row.get(9).ok(),
+                    post_request_script: row.get(10).ok(),
+                    body_type: row.get(11).ok(),
+                    form_data: row.get(12).ok(),
+                    binary_file_path: row.get(13).ok(),
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -917,7 +1090,7 @@ pub fn create_environment(
             (&id, &workspace_id, &collection_id, &name, &variables),
         )
         .map_err(|e| e.to_string())?;
-        
+
         let mut stmt = conn
             .prepare("SELECT id, workspace_id, collection_id, name, variables, is_active, created_at FROM environments WHERE id = ?1")
             .map_err(|e| e.to_string())?;
@@ -954,7 +1127,7 @@ pub fn update_environment(
             (&id, &name, &variables),
         )
         .map_err(|e| e.to_string())?;
-        
+
         let mut stmt = conn
             .prepare("SELECT id, workspace_id, collection_id, name, variables, is_active, created_at FROM environments WHERE id = ?1")
             .map_err(|e| e.to_string())?;
@@ -1004,14 +1177,13 @@ pub fn set_active_environment(
         conn.execute(
             "UPDATE environments SET is_active = 0 WHERE workspace_id = ?1 OR workspace_id IS NULL",
             [&workspace_id],
-        ).map_err(|e| e.to_string())?;
-        
+        )
+        .map_err(|e| e.to_string())?;
+
         // Set the active one
         if let Some(id) = id {
-            conn.execute(
-                "UPDATE environments SET is_active = 1 WHERE id = ?1",
-                [&id],
-            ).map_err(|e| e.to_string())?;
+            conn.execute("UPDATE environments SET is_active = 1 WHERE id = ?1", [&id])
+                .map_err(|e| e.to_string())?;
         }
         Ok(())
     } else {
@@ -1031,34 +1203,69 @@ pub struct HistoryEntry {
     pub response_body: Option<String>,
     pub response_headers: Option<String>,
     pub time_ms: Option<i32>,
+    pub test_results: Option<String>,
+    pub body_type: Option<String>,
+    pub form_data: Option<String>,
+    pub binary_file_path: Option<String>,
     pub executed_at: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HistorySaveArgs {
+    pub id: String,
+    pub workspace_id: String,
+    pub request_id: Option<String>,
+    pub method: String,
+    pub url: String,
+    pub request_headers: Option<String>,
+    pub request_body: Option<String>,
+    pub status_code: Option<i32>,
+    pub response_body: Option<String>,
+    pub response_headers: Option<String>,
+    pub time_ms: Option<i32>,
+    pub test_results: Option<String>,
+    pub body_type: Option<String>,
+    pub form_data: Option<String>,
+    pub binary_file_path: Option<String>,
 }
 
 #[tauri::command]
 pub fn save_history_entry(
     state: tauri::State<'_, AppState>,
-    id: String,
-    workspace_id: String,
-    request_id: Option<String>,
-    method: String,
-    url: String,
-    request_headers: Option<String>,
-    request_body: Option<String>,
-    status_code: Option<i32>,
-    response_body: Option<String>,
-    response_headers: Option<String>,
-    time_ms: Option<i32>,
+    args: HistorySaveArgs,
 ) -> std::result::Result<(), String> {
+    println!("Saving history entry: {} {}", args.method, args.url);
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         conn.execute(
-            "INSERT INTO request_history (id, workspace_id, request_id, method, url, request_headers, request_body, status_code, response_body, response_headers, time_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            rusqlite::params![id, workspace_id, request_id, method, url, request_headers, request_body, status_code, response_body, response_headers, time_ms],
-        ).map_err(|e| e.to_string())?;
+            "INSERT INTO request_history (id, workspace_id, request_id, method, url, request_headers, request_body, status_code, response_body, response_headers, time_ms, test_results, body_type, form_data, binary_file_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            rusqlite::params![
+                args.id, 
+                args.workspace_id, 
+                args.request_id, 
+                args.method, 
+                args.url, 
+                args.request_headers, 
+                args.request_body, 
+                args.status_code, 
+                args.response_body, 
+                args.response_headers, 
+                args.time_ms, 
+                args.test_results, 
+                args.body_type, 
+                args.form_data, 
+                args.binary_file_path
+            ],
+        ).map_err(|e| {
+            println!("Error saving history entry: {}", e);
+            e.to_string()
+        })?;
+        println!("History entry saved successfully");
         // Keep only the last 200 entries per workspace
         conn.execute(
             "DELETE FROM request_history WHERE workspace_id = ?1 AND id NOT IN (SELECT id FROM request_history WHERE workspace_id = ?1 ORDER BY executed_at DESC LIMIT 200)",
-            [&workspace_id],
+            [&args.workspace_id],
         ).map_err(|e| e.to_string())?;
         Ok(())
     } else {
@@ -1071,27 +1278,38 @@ pub fn get_history(
     state: tauri::State<'_, AppState>,
     workspace_id: String,
 ) -> std::result::Result<Vec<HistoryEntry>, String> {
+    println!("Fetching history for workspace: {}", workspace_id);
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         let mut stmt = conn.prepare(
-            "SELECT id, workspace_id, request_id, method, url, request_headers, request_body, status_code, response_body, response_headers, time_ms, executed_at FROM request_history WHERE workspace_id = ?1 ORDER BY executed_at DESC LIMIT 200"
-        ).map_err(|e| e.to_string())?;
-        let entries = stmt.query_map([&workspace_id], |row| {
-            Ok(HistoryEntry {
-                id: row.get(0)?,
-                workspace_id: row.get(1)?,
-                request_id: row.get(2)?,
-                method: row.get(3)?,
-                url: row.get(4)?,
-                request_headers: row.get(5)?,
-                request_body: row.get(6)?,
-                status_code: row.get(7)?,
-                response_body: row.get(8)?,
-                response_headers: row.get(9)?,
-                time_ms: row.get(10)?,
-                executed_at: row.get(11)?,
+            "SELECT id, workspace_id, request_id, method, url, request_headers, request_body, status_code, response_body, response_headers, time_ms, test_results, body_type, form_data, binary_file_path, executed_at FROM request_history WHERE workspace_id = ?1 ORDER BY executed_at DESC LIMIT 200"
+        ).map_err(|e| {
+            println!("Error preparing get_history query: {}", e);
+            e.to_string()
+        })?;
+        println!("Executing get_history query...");
+        let entries = stmt
+            .query_map([&workspace_id], |row| {
+                Ok(HistoryEntry {
+                    id: row.get(0)?,
+                    workspace_id: row.get(1)?,
+                    request_id: row.get(2)?,
+                    method: row.get(3)?,
+                    url: row.get(4)?,
+                    request_headers: row.get(5)?,
+                    request_body: row.get(6)?,
+                    status_code: row.get(7)?,
+                    response_body: row.get(8)?,
+                    response_headers: row.get(9)?,
+                    time_ms: row.get(10)?,
+                    test_results: row.get(11)?,
+                    body_type: row.get(12)?,
+                    form_data: row.get(13)?,
+                    binary_file_path: row.get(14)?,
+                    executed_at: row.get(15)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         let result: Vec<HistoryEntry> = entries.filter_map(|e| e.ok()).collect();
         Ok(result)
     } else {
@@ -1109,7 +1327,8 @@ pub fn clear_history(
         conn.execute(
             "DELETE FROM request_history WHERE workspace_id = ?1",
             [&workspace_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     } else {
         Err("Database not initialized".to_string())

@@ -1,4 +1,4 @@
-import type { KeyValuePair } from "./types";
+import type { BodyViewMode, FormDataEntry, KeyValuePair } from "./types";
 
 export function generateId() {
   return Math.random().toString(36).substring(2, 9);
@@ -6,6 +6,10 @@ export function generateId() {
 
 export function emptyKeyValueRow(): KeyValuePair {
   return { id: generateId(), key: "", value: "", enabled: true };
+}
+
+export function emptyFormDataRow(): FormDataEntry {
+  return { id: generateId(), key: "", value: "", type: "text", enabled: true };
 }
 
 export function defaultHeaders(): KeyValuePair[] {
@@ -33,6 +37,23 @@ export function methodColor(method: string) {
   }
 }
 
+export function methodBgColor(method: string) {
+  switch (method.toUpperCase()) {
+    case "GET":
+      return "bg-method-get";
+    case "POST":
+      return "bg-method-post";
+    case "PUT":
+      return "bg-method-put";
+    case "DELETE":
+      return "bg-method-delete";
+    case "PATCH":
+      return "bg-method-patch";
+    default:
+      return "bg-muted";
+  }
+}
+
 export function parseHeadersToRows(headersJson?: string | null): KeyValuePair[] {
   if (!headersJson) {
     return defaultHeaders();
@@ -52,6 +73,19 @@ export function parseHeadersToRows(headersJson?: string | null): KeyValuePair[] 
   }
 }
 
+export function parseFormDataToRows(formDataJson?: string | null): FormDataEntry[] {
+  if (!formDataJson) {
+    return [emptyFormDataRow()];
+  }
+
+  try {
+    const parsed = JSON.parse(formDataJson) as FormDataEntry[];
+    return parsed.length > 0 ? [...parsed, emptyFormDataRow()] : [emptyFormDataRow()];
+  } catch {
+    return [emptyFormDataRow()];
+  }
+}
+
 export function headerRowsToObject(rows: KeyValuePair[]) {
   const out: Record<string, string> = {};
   rows.forEach((row) => {
@@ -62,19 +96,42 @@ export function headerRowsToObject(rows: KeyValuePair[]) {
   return out;
 }
 
-export function formatResponseBody(rawBody: string, mode: "pretty" | "raw") {
-  if (mode === "raw") {
+export function formatResponseBody(rawBody: string, mode: BodyViewMode) {
+  if (mode === "raw" || mode === "preview") {
     return rawBody;
   }
   const trimmed = rawBody.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
-    return rawBody;
+  
+  // JSON
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      return JSON.stringify(JSON.parse(rawBody), null, 2);
+    } catch {
+      return rawBody;
+    }
   }
-  try {
-    return JSON.stringify(JSON.parse(rawBody), null, 2);
-  } catch {
-    return rawBody;
+
+  // HTML/XML simple formatter
+  if (trimmed.startsWith("<")) {
+    let formatted = "";
+    let indent = 0;
+    const tokens = rawBody.split(/(<[^>]*>)/g).filter(t => t.trim() !== "");
+    
+    tokens.forEach(token => {
+      if (token.startsWith("</")) {
+        indent--;
+        formatted += "  ".repeat(Math.max(0, indent)) + token + "\n";
+      } else if (token.startsWith("<") && !token.endsWith("/>") && !token.startsWith("<!") && !token.startsWith("<?")) {
+        formatted += "  ".repeat(Math.max(0, indent)) + token + "\n";
+        indent++;
+      } else {
+        formatted += "  ".repeat(Math.max(0, indent)) + token + "\n";
+      }
+    });
+    return formatted.trim();
   }
+
+  return rawBody;
 }
 
 export function resolveVariables(text: string, env: Record<string, string>): string {

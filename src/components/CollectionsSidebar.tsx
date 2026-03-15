@@ -1,4 +1,4 @@
-import { ChevronRight, Folder as FolderIcon, MoreHorizontal, Plus, GripVertical, Upload, History as HistoryIcon } from "lucide-react";
+import { ChevronRight, Folder as FolderIcon, MoreHorizontal, Plus, GripVertical, Upload, History as HistoryIcon, Play } from "lucide-react";
 import { useMemo, useState, useCallback } from "react";
 import {
   DndContext,
@@ -9,11 +9,9 @@ import {
   useSensors,
   DragEndEvent,
   DragStartEvent,
-  DragOverlay,
-  defaultDropAnimationSideEffects
+  DragOverlay
 } from '@dnd-kit/core';
 import {
-  arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
@@ -21,7 +19,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Collection, Folder, StoredRequest } from "../types";
-import { methodColor } from "../utils";
+import { methodColor, methodBgColor } from "../utils";
 
 type Props = {
   collections: Collection[];
@@ -44,6 +42,7 @@ type Props = {
   onDuplicateCollection: (collection: Collection) => void;
   onDeleteCollection: (collection: Collection) => void;
   onRenameFolder: (folder: Folder) => void;
+  onDuplicateFolder: (folder: Folder) => void;
   onDeleteFolder: (folder: Folder) => void;
   onMoveFolder: (folderId: string, targetCollectionId: string, targetPosition: number) => void;
   onMoveRequest: (requestId: string, targetCollectionId: string, targetFolderId: string | null, targetPosition: number) => void;
@@ -52,11 +51,13 @@ type Props = {
   onRenameRequest: (request: StoredRequest) => void;
   onDuplicateRequest: (request: StoredRequest) => void;
   onDeleteRequest: (request: StoredRequest) => void;
-  isLoadingRequests: boolean;
-  isCreatingRequest: boolean;
   activeRequestIsDirty: boolean;
-  onImport: () => void;
+  isLoadingRequests: boolean;
+  onExportWorkspace: () => void;
+  onImportWorkspace: () => void;
   onHistory: () => void;
+  onRunCollection: (collection: Collection) => void;
+  onRunFolder: (folder: Folder) => void;
   peersCount: number;
 };
 
@@ -65,6 +66,7 @@ interface CollectionHeaderProps {
   active: boolean;
   expanded: boolean;
   onSelect: () => void;
+  onRun: () => void;
   onCopy: () => void;
   onRename: () => void;
   onDuplicate: () => void;
@@ -78,6 +80,7 @@ function CollectionHeader({
   active,
   expanded,
   onSelect,
+  onRun,
   onCopy,
   onRename,
   onDuplicate,
@@ -123,6 +126,13 @@ function CollectionHeader({
             onClick={(e) => e.stopPropagation()}
           >
             <button
+              onClick={() => { setMenuId(null); onRun(); }}
+              className="w-full px-3 py-1.5 text-left text-[11px] hover:bg-white/5 flex items-center space-x-2"
+            >
+              <Play size={10} fill="currentColor" className="text-method-get" />
+              <span>Run Collection</span>
+            </button>
+            <button
               onClick={() => { setMenuId(null); onCopy(); }}
               className="w-full px-3 py-1.5 text-left text-[11px] hover:bg-white/5"
             >
@@ -164,7 +174,9 @@ interface FolderItemProps {
   onSelectRequest: (r: StoredRequest) => void;
   onCreateRequest: (collectionId?: string, folderId?: string | null) => void;
   onRenameFolder: (f: Folder) => void;
+  onDuplicateFolder: (f: Folder) => void;
   onDeleteFolder: (f: Folder) => void;
+  onRunFolder: (f: Folder) => void;
   openFolderMenuId: string | null;
   setOpenFolderMenuId: (id: string | null) => void;
   openRequestMenuId: string | null;
@@ -187,7 +199,9 @@ function FolderItem({
   onSelectRequest,
   onCreateRequest,
   onRenameFolder,
+  onDuplicateFolder,
   onDeleteFolder,
+  onRunFolder,
   openFolderMenuId,
   setOpenFolderMenuId,
   openRequestMenuId,
@@ -262,11 +276,30 @@ function FolderItem({
                 <button
                   onClick={() => {
                     setOpenFolderMenuId(null);
+                    onRunFolder(folder);
+                  }}
+                  className="w-full px-2 py-1.5 text-left text-[11px] hover:bg-white/5 flex items-center space-x-2"
+                >
+                  <Play size={10} fill="currentColor" className="text-method-get" />
+                  <span>Run Folder</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setOpenFolderMenuId(null);
                     onRenameFolder(folder);
                   }}
                   className="w-full px-2 py-1.5 text-left text-[11px] hover:bg-white/5"
                 >
                   Rename
+                </button>
+                <button
+                  onClick={() => {
+                    setOpenFolderMenuId(null);
+                    onDuplicateFolder(folder);
+                  }}
+                  className="w-full px-2 py-1.5 text-left text-[11px] hover:bg-white/5"
+                >
+                  Duplicate
                 </button>
                 <button
                   onClick={() => {
@@ -476,7 +509,10 @@ export function CollectionsSidebar({
   onDuplicateCollection,
   onDeleteCollection,
   onRenameFolder,
+  onDuplicateFolder,
   onDeleteFolder,
+  onRunCollection,
+  onRunFolder,
   onMoveFolder,
   onMoveRequest,
   onCopyRequest,
@@ -485,9 +521,9 @@ export function CollectionsSidebar({
   onDuplicateRequest,
   onDeleteRequest,
   isLoadingRequests,
-  isCreatingRequest,
   activeRequestIsDirty,
-  onImport,
+  onExportWorkspace,
+  onImportWorkspace,
   onHistory,
   peersCount,
 }: Props) {
@@ -634,18 +670,25 @@ export function CollectionsSidebar({
         <div className="px-4 py-4 border-b border-border space-y-3">
           <button
             onClick={onCreateCollection}
-            disabled={isCreatingRequest}
             className="w-full h-9 flex gap-2 items-center justify-center bg-primary hover:bg-primary-hover text-white rounded-md transition-all text-[13px] font-semibold shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus size={16} strokeWidth={2.5} />
-            <span>{isCreatingRequest ? "Creating..." : "New Collection"}</span>
+            <span>New Collection</span>
           </button>
-          <div className="flex items-center space-x-2">
+          <div className="flex gap-2">
             <button
-              onClick={onImport}
+              onClick={onImportWorkspace}
               className="flex-1 h-8 flex items-center justify-center bg-surface border border-border hover:bg-surface-hover text-gray-300 hover:text-white rounded-md transition-colors text-[12px] font-medium"
+              title="Import Workspace"
             >
               Import
+            </button>
+            <button
+              onClick={onExportWorkspace}
+              className="flex-1 h-8 flex items-center justify-center bg-surface border border-border hover:bg-surface-hover text-gray-300 hover:text-white rounded-md transition-colors text-[12px] font-medium"
+              title="Export Workspace"
+            >
+              Export
             </button>
             <button
               onClick={onHistory}
@@ -703,6 +746,7 @@ export function CollectionsSidebar({
                           setActiveCollectionId(collection.id);
                           toggleCollectionExpanded(collection.id);
                         }}
+                        onRun={() => onRunCollection(collection)}
                         onCopy={() => onCopyCollection(collection)}
                         onRename={() => onRenameCollection(collection)}
                         onDuplicate={() => onDuplicateCollection(collection)}
@@ -727,7 +771,9 @@ export function CollectionsSidebar({
                                 onSelectRequest={onSelectRequest}
                                 onCreateRequest={onCreateRequest}
                                 onRenameFolder={onRenameFolder}
+                                onDuplicateFolder={onDuplicateFolder}
                                 onDeleteFolder={onDeleteFolder}
+                                onRunFolder={onRunFolder}
                                 openFolderMenuId={openFolderMenuId}
                                 setOpenFolderMenuId={setOpenFolderMenuId}
                                 openRequestMenuId={openRequestMenuId}
@@ -813,7 +859,7 @@ export function CollectionsSidebar({
         <DragOverlay adjustScale={true}>
           {activeId && activeType === 'request' && activeItem && (
             <div className="flex items-center px-3 py-1.5 bg-[#2d2d2d] border border-primary/40 rounded shadow-2xl opacity-90 cursor-grabbing min-w-[180px] z-50 ring-1 ring-primary/20">
-              <span className={`w-2 h-2 rounded-full mr-2 bg-${methodColor(activeItem.method)}-500`} />
+              <span className={`w-2 h-2 rounded-full mr-2 ${methodBgColor(activeItem.method)}`} />
               <span className="text-gray-200 text-[11px] font-medium truncate">{activeItem.name}</span>
             </div>
           )}

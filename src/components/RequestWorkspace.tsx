@@ -1,23 +1,26 @@
 import {
+  File as FileIcon,
+  FileText,
   ChevronDown,
   Folder,
-  MoreHorizontal,
   Play,
   Plus,
   Save,
+  Trash,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { KeyValueEditor } from "./KeyValueEditor";
+import { FormDataEditor } from "./FormDataEditor";
 import { methodColor } from "../utils";
 import { VariableInput } from "./VariableInput";
-import type { KeyValuePair, WorkspaceTab, Environment } from "../types";
+import { open } from "@tauri-apps/plugin-dialog";
+import type { KeyValuePair, WorkspaceTab, Environment, FormDataEntry } from "../types";
 
 type Props = {
   activeCollectionName: string;
   activeRequestName: string;
   isDirty: boolean;
-  isCreatingRequest: boolean;
   isSavingRequest: boolean;
   onCreateRequest: () => void;
   onSaveRequest: () => void;
@@ -37,13 +40,22 @@ type Props = {
   onSendRequest: () => void;
   environments: Environment[];
   activeEnvId: string | null;
+  reqPreRequestScript: string | null;
+  setReqPreRequestScript: Dispatch<SetStateAction<string | null>>;
+  reqPostRequestScript: string | null;
+  setReqPostRequestScript: Dispatch<SetStateAction<string | null>>;
+  reqBodyType: "none" | "raw" | "form-data" | "binary";
+  setReqBodyType: Dispatch<SetStateAction<"none" | "raw" | "form-data" | "binary">>;
+  reqFormData: FormDataEntry[];
+  setReqFormData: Dispatch<SetStateAction<FormDataEntry[]>>;
+  reqBinaryFilePath: string | null;
+  setReqBinaryFilePath: Dispatch<SetStateAction<string | null>>;
 };
 
 export function RequestWorkspace({
   activeCollectionName,
   activeRequestName,
   isDirty,
-  isCreatingRequest,
   isSavingRequest,
   onCreateRequest,
   onSaveRequest,
@@ -63,6 +75,16 @@ export function RequestWorkspace({
   onSendRequest,
   environments,
   activeEnvId,
+  reqPreRequestScript,
+  setReqPreRequestScript,
+  reqPostRequestScript,
+  setReqPostRequestScript,
+  reqBodyType,
+  setReqBodyType,
+  reqFormData,
+  setReqFormData,
+  reqBinaryFilePath,
+  setReqBinaryFilePath,
 }: Props) {
   const [isMethodOpen, setIsMethodOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -118,11 +140,11 @@ export function RequestWorkspace({
       </div>
 
       <div className="px-6 py-4 bg-background border-b border-border shrink-0">
-        <div className="flex items-center bg-surface border border-border rounded-lg overflow-hidden group focus-within:border-primary/50 focus-within:ring-4 focus-within:ring-primary/5 transition-all">
+        <div className="flex items-center bg-surface border border-border rounded-lg group focus-within:border-primary/50 focus-within:ring-4 focus-within:ring-primary/5 transition-all">
           <div className="relative shrink-0 flex items-center border-r border-border bg-surface-hover/30" ref={dropdownRef}>
             <button
               onClick={() => setIsMethodOpen(!isMethodOpen)}
-              className={`flex items-center space-x-2 h-10 px-6 font-black text-[13px] tracking-wide transition-all hover:bg-surface-hover/50 ${methodColor(reqMethod)}`}
+              className={`flex items-center space-x-2 h-10 px-6 font-black text-[13px] tracking-wide transition-all hover:bg-surface-hover/50 rounded-l-lg ${methodColor(reqMethod)}`}
             >
               <span>{reqMethod}</span>
               <ChevronDown
@@ -169,7 +191,7 @@ export function RequestWorkspace({
             onClick={onSendRequest}
             disabled={isSending || !reqUrl.trim()}
             title="Send Request (Ctrl+Enter)"
-            className="shrink-0 h-10 px-8 bg-primary hover:bg-primary-hover text-white font-black text-[14px] tracking-widest uppercase transition-all disabled:opacity-30 disabled:grayscale flex items-center space-x-2 active:scale-95"
+            className="shrink-0 h-10 px-8 bg-primary hover:bg-primary-hover text-white font-black text-[14px] tracking-widest uppercase transition-all disabled:opacity-30 disabled:grayscale flex items-center space-x-2 active:scale-95 rounded-r-lg"
           >
             {isSending ? (
               <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
@@ -187,7 +209,7 @@ export function RequestWorkspace({
         <div className="flex-1 flex flex-col min-h-0 relative border-b border-border">
           <div className="flex border-b border-border px-4 shrink-0 bg-surface/20">
             {(
-              ["Params", "Headers", "Body", "Auth", "Tests", "Docs"] as const
+              ["Params", "Headers", "Body", "Pre-request", "Auth", "Tests", "Docs"] as const
             ).map((tab) => (
               <button
                 key={tab}
@@ -225,58 +247,204 @@ export function RequestWorkspace({
             )}
 
             {activeWorkspaceTab === "Body" && (
-              <div className="flex-1 flex flex-col h-full bg-background overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-surface/30 shrink-0">
-                  <span className="text-[11px] font-bold uppercase tracking-widest text-muted">
-                    Request Body
-                  </span>
-                </div>
-                <div className="flex-1 relative bg-background group/editor flex overflow-hidden">
-                  <div className="shrink-0 w-12 bg-surface/5 border-r border-border text-right py-4 px-3 text-[12px] text-muted/30 font-mono select-none overflow-hidden">
-                    {reqBody.split("\n").map((_, i) => (
-                      <div key={i} className="h-[21px] leading-[21px]">
-                        {i + 1}
-                      </div>
+              <div className="flex-1 flex flex-col h-full bg-background overflow-hidden font-sans">
+                <div className="flex items-center space-x-4 px-4 py-2 border-b border-border bg-surface/30 shrink-0">
+                  <div className="flex items-center space-x-1">
+                    {(["none", "raw", "form-data", "binary"] as const).map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => setReqBodyType(type)}
+                        className={`px-3 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all
+                          ${reqBodyType === type 
+                            ? "bg-primary text-white shadow-lg shadow-primary/20" 
+                            : "text-muted hover:text-gray-300 hover:bg-white/5"}
+                        `}
+                      >
+                        {type === "form-data" ? "Form Data" : type}
+                      </button>
                     ))}
                   </div>
-                  <div className="flex-1 relative overflow-hidden">
-                    <div
-                      id="req-body-highlight"
-                      className="absolute inset-0 p-4 font-mono text-[14px] leading-[21px] pointer-events-none whitespace-pre overflow-hidden"
-                    >
-                      {reqBody.split(/(".*?"|[:{}\[\]\s,]+|\d+|true|false|null)/g).map((token, i, arr) => {
-                        if (/^".*"$/.test(token)) {
-                          if (arr[i + 1]?.includes(':')) return <span key={i} className="text-[#9CDCFE]">{token}</span>;
-                          return <span key={i} className="text-[#CE9178]">{token}</span>;
-                        }
-                        if (/^\d+$/.test(token)) return <span key={i} className="text-[#B5CEA8]">{token}</span>;
-                        if (/^(true|false|null)$/.test(token)) return <span key={i} className="text-[#569CD6] font-bold">{token}</span>;
-                        if (/^[:{}\[\]\s,]+$/.test(token)) return <span key={i} className="text-gray-400">{token}</span>;
-                        return <span key={i} className="text-gray-200">{token}</span>;
-                      })}
+                </div>
+
+                <div className="flex-1 overflow-hidden relative">
+                  {reqBodyType === "none" && (
+                    <div className="flex flex-col items-center justify-center h-full text-muted space-y-2 bg-background/50">
+                      <div className="p-4 rounded-full bg-surface/20">
+                         <Play size={24} className="opacity-20" />
+                      </div>
+                      <span className="text-sm font-medium">This request does not have a body</span>
                     </div>
-                    <VariableInput
-                      value={reqBody}
-                      onChange={setReqBody}
-                      type="textarea"
+                  )}
+
+                  {reqBodyType === "raw" && (
+                    <div className="flex-1 flex flex-col h-full bg-background overflow-hidden relative">
+                       <div className="flex-1 relative bg-background group/editor flex overflow-hidden">
+                        <div className="shrink-0 w-12 bg-surface/5 border-r border-border text-right py-4 px-3 text-[12px] text-muted/30 font-mono select-none overflow-hidden">
+                          {reqBody.split("\n").map((_, i) => (
+                            <div key={i} className="h-[21px] leading-[21px]">
+                              {i + 1}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex-1 relative overflow-hidden">
+                          <div
+                            id="req-body-highlight"
+                            className="absolute inset-0 p-4 font-mono text-[14px] leading-[21px] pointer-events-none whitespace-pre overflow-hidden"
+                          >
+                            {reqBody.split(/(".*?"|[:{}\[\]\s,]+|\d+|true|false|null)/g).map((token, i, arr) => {
+                              if (/^".*"$/.test(token)) {
+                                if (arr[i + 1]?.includes(':')) return <span key={i} className="text-[#9CDCFE]">{token}</span>;
+                                return <span key={i} className="text-[#CE9178]">{token}</span>;
+                              }
+                              if (/^\d+$/.test(token)) return <span key={i} className="text-[#B5CEA8]">{token}</span>;
+                              if (/^(true|false|null)$/.test(token)) return <span key={i} className="text-[#569CD6] font-bold">{token}</span>;
+                              if (/^[:{}\[\]\s,]+$/.test(token)) return <span key={i} className="text-gray-400">{token}</span>;
+                              return <span key={i} className="text-gray-200">{token}</span>;
+                            })}
+                          </div>
+                          <VariableInput
+                            value={reqBody}
+                            onChange={setReqBody}
+                            type="textarea"
+                            environments={environments}
+                            activeEnvId={activeEnvId}
+                            onScroll={(e) => {
+                              const target = e.currentTarget;
+                              const highlight = document.getElementById("req-body-highlight");
+                              if (highlight) {
+                                highlight.scrollTop = target.scrollTop;
+                                highlight.scrollLeft = target.scrollLeft;
+                              }
+                            }}
+                            className="w-full h-full bg-transparent p-4 text-[14px] font-mono text-transparent caret-white focus:outline-none resize-none leading-[21px] selection:bg-primary/20 relative z-10 whitespace-pre overflow-auto"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {reqBodyType === "form-data" && (
+                    <FormDataEditor
+                      items={reqFormData}
+                      setItems={setReqFormData}
                       environments={environments}
                       activeEnvId={activeEnvId}
-                      onScroll={(e) => {
-                        const target = e.currentTarget;
-                        const highlight = document.getElementById("req-body-highlight");
-                        if (highlight) {
-                          highlight.scrollTop = target.scrollTop;
-                          highlight.scrollLeft = target.scrollLeft;
-                        }
-                      }}
-                      className="w-full h-full bg-transparent p-4 text-[14px] font-mono text-transparent caret-white focus:outline-none resize-none leading-[21px] selection:bg-primary/20 relative z-10 whitespace-pre overflow-auto"
                     />
-                  </div>
+                  )}
+
+                  {reqBodyType === "binary" && (
+                    <div className="flex flex-col items-center justify-center h-full p-8 space-y-6 bg-surface/5">
+                      <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center border border-primary/20 shadow-inner">
+                        <FileIcon size={40} className="text-primary" strokeWidth={1.5} />
+                      </div>
+                      <div className="text-center space-y-2 max-w-sm">
+                        <h3 className="text-[16px] font-bold text-gray-100">Select Binary File</h3>
+                        <p className="text-[13px] text-muted leading-relaxed">
+                          Choose a file from your system to send as the raw request body. 
+                          The file content will be sent as-is.
+                        </p>
+                      </div>
+                      
+                      <div className="flex flex-col items-center space-y-4 w-full max-w-md">
+                        <button
+                          onClick={async () => {
+                            try {
+                              const selected = await open({
+                                multiple: false,
+                                directory: false,
+                              });
+                              if (selected && typeof selected === "string") {
+                                setReqBinaryFilePath(selected);
+                              }
+                            } catch (err) {
+                              console.error("Failed to select binary file:", err);
+                            }
+                          }}
+                          className="w-full h-12 flex items-center justify-center space-x-3 bg-primary/10 hover:bg-primary/20 border border-primary/30 rounded-xl transition-all group active:scale-95"
+                        >
+                          <Plus size={18} className="text-primary group-hover:scale-110 transition-transform" />
+                          <span className="text-[14px] font-bold text-primary tracking-wide">
+                            {reqBinaryFilePath ? "Change File" : "Choose File"}
+                          </span>
+                        </button>
+
+                        {reqBinaryFilePath && (
+                          <div className="w-full p-4 bg-surface border border-border rounded-xl flex items-center justify-between group/file">
+                            <div className="flex items-center space-x-3 overflow-hidden">
+                              <div className="p-2 rounded-lg bg-white/5">
+                                <FileText size={16} className="text-muted" />
+                              </div>
+                              <div className="flex flex-col min-w-0">
+                                <span className="text-[13px] font-bold text-gray-200 truncate">
+                                  {reqBinaryFilePath.split(/[\\/]/).pop()}
+                                </span>
+                                <span className="text-[11px] text-muted truncate opacity-60">
+                                  {reqBinaryFilePath}
+                                </span>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => setReqBinaryFilePath(null)}
+                              className="p-2 text-muted hover:text-red-400 transition-colors opacity-0 group-hover/file:opacity-100"
+                            >
+                              <Trash size={16} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
 
-            {["Auth", "Tests", "Docs"].includes(activeWorkspaceTab) && (
+            {activeWorkspaceTab === "Pre-request" && (
+              <div className="flex-1 flex flex-col h-full bg-background overflow-hidden relative">
+                <div className="absolute inset-0 p-4 font-mono text-[14px] leading-[21px] text-gray-200 pointer-events-none whitespace-pre overflow-hidden" id="req-pre-script-highlight">
+                  {reqPreRequestScript}
+                </div>
+                <textarea
+                  value={reqPreRequestScript || ""}
+                  onChange={(e) => setReqPreRequestScript(e.target.value)}
+                  placeholder="// Write JavaScript code here. Available API: pm.*"
+                  spellCheck={false}
+                  onScroll={(e) => {
+                    const target = e.currentTarget;
+                    const highlight = document.getElementById("req-pre-script-highlight");
+                    if (highlight) {
+                      highlight.scrollTop = target.scrollTop;
+                      highlight.scrollLeft = target.scrollLeft;
+                    }
+                  }}
+                  className="w-full h-full bg-transparent p-4 text-[14px] font-mono text-transparent caret-white focus:outline-none resize-none leading-[21px] selection:bg-primary/20 relative z-10 whitespace-pre overflow-auto"
+                />
+              </div>
+            )}
+
+            {activeWorkspaceTab === "Tests" && (
+              <div className="flex-1 flex flex-col h-full bg-background overflow-hidden relative">
+                <div className="absolute inset-0 p-4 font-mono text-[14px] leading-[21px] text-gray-200 pointer-events-none whitespace-pre overflow-hidden" id="req-post-script-highlight">
+                  {reqPostRequestScript}
+                </div>
+                <textarea
+                  value={reqPostRequestScript || ""}
+                  onChange={(e) => setReqPostRequestScript(e.target.value)}
+                  placeholder="// Write JavaScript code to validate the response. Available API: pm.*"
+                  spellCheck={false}
+                  onScroll={(e) => {
+                    const target = e.currentTarget;
+                    const highlight = document.getElementById("req-post-script-highlight");
+                    if (highlight) {
+                      highlight.scrollTop = target.scrollTop;
+                      highlight.scrollLeft = target.scrollLeft;
+                    }
+                  }}
+                  className="w-full h-full bg-transparent p-4 text-[14px] font-mono text-transparent caret-white focus:outline-none resize-none leading-[21px] selection:bg-primary/20 relative z-10 whitespace-pre overflow-auto"
+                />
+              </div>
+            )}
+
+            {["Auth", "Docs"].includes(activeWorkspaceTab) && (
               <div className="flex items-center justify-center h-full text-muted text-sm font-mono bg-background/50">
                 <span>
                   No saved {activeWorkspaceTab.toLowerCase()} data for this
