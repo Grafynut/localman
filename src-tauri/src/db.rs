@@ -98,6 +98,11 @@ pub fn init_db(
             FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
             FOREIGN KEY(collection_id) REFERENCES collections(id)
         );
+        CREATE TABLE IF NOT EXISTS globals (
+            id TEXT PRIMARY KEY,
+            variables TEXT NOT NULL
+        );
+        INSERT OR IGNORE INTO globals (id, variables) VALUES ('global_settings_1', '{}');
         "
     )?;
 
@@ -152,6 +157,17 @@ pub fn init_db(
         [],
     );
 
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS globals (
+        id TEXT PRIMARY KEY,
+        variables TEXT NOT NULL
+    )",
+        [],
+    );
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO globals (id, variables) VALUES ('global_settings_1', '{}')",
+        [],
+    );
 
     
     let _ = conn.execute(
@@ -1327,6 +1343,44 @@ pub fn clear_history(
         conn.execute(
             "DELETE FROM request_history WHERE workspace_id = ?1",
             [&workspace_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn get_globals(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<String, String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        let mut stmt = conn
+            .prepare("SELECT variables FROM globals WHERE id = 'global_settings_1'")
+            .map_err(|e| e.to_string())?;
+        let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+        if let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            Ok(row.get(0).unwrap_or_else(|_| "{}".to_string()))
+        } else {
+            Ok("{}".to_string())
+        }
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn update_globals(
+    state: tauri::State<'_, AppState>,
+    variables: String,
+) -> std::result::Result<(), String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        conn.execute(
+            "INSERT OR REPLACE INTO globals (id, variables) VALUES ('global_settings_1', ?1)",
+            [&variables],
         )
         .map_err(|e| e.to_string())?;
         Ok(())

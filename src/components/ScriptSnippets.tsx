@@ -13,24 +13,24 @@ const CORRECTED_SNIPPETS: Snippet[] = [
     description: "Verify if the response status code is 200."
   },
   {
-    name: "Check JSON property",
-    code: 'pm.test("Check property", () => {\n  const data = pm.response.json();\n  pm.expect(data.id).to.equal(1);\n});',
-    description: "Check a property in the JSON response."
+    name: "Check response time",
+    code: 'pm.test("Response time is less than 200ms", () => {\n  pm.expect(pm.response.responseTime).to.be.below(200);\n});',
+    description: "Verify that the response returns quickly."
   },
   {
-    name: "Set Environment Variable",
-    code: 'pm.environment.set("token", "my-secret-token");',
-    description: "Set an environment variable."
+    name: "Check Body matches string",
+    code: 'pm.test("Body matches string", () => {\n  pm.response.to.have.body("success");\n});',
+    description: "Check if the response body matches a specific string."
   },
   {
-    name: "Set Global Variable",
-    code: 'pm.globals.set("baseUrl", "https://api.example.com");',
-    description: "Set a global variable."
+    name: "Check JSON schema",
+    code: 'const schema = {\n  "type": "object",\n  "properties": {\n    "id": { "type": "number" }\n  }\n};\npm.test("JSON Schema is valid", () => {\n  pm.response.to.have.jsonSchema(schema);\n});',
+    description: "Validate the JSON response against a schema."
   },
   {
-    name: "Get Variable",
-    code: 'const myVar = pm.variables.get("myVar");',
-    description: "Get a variable (Env or Global)."
+    name: "Send a request",
+    code: 'pm.sendRequest("https://postman-echo.com/get", (err, res) => {\n  console.log(res.json());\n});',
+    description: "Send an asynchronous request from the script."
   },
 ];
 

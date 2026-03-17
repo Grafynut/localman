@@ -152,7 +152,33 @@ export function resolveVariables(text: string, env: Record<string, string>): str
           return new Date().toISOString();
         case "$randomInt":
           return Math.floor(Math.random() * 1001).toString();
+        case "$randomEmail":
+          return `user_${Math.random().toString(36).substring(7)}@example.com`;
+        case "$randomPassword":
+          return Math.random().toString(36).substring(2, 10) + "A1!";
+        case "$randomFirstName":
+          const firstNames = ["James", "Mary", "Robert", "Patricia", "John", "Jennifer", "Michael", "Linda"];
+          return firstNames[Math.floor(Math.random() * firstNames.length)];
+        case "$randomLastName":
+          const lastNames = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis"];
+          return lastNames[Math.floor(Math.random() * lastNames.length)];
+        case "$randomCity":
+          const cities = ["New York", "London", "Tokyo", "Paris", "Berlin", "Sydney", "Mumbai", "Sao Paulo"];
+          return cities[Math.floor(Math.random() * cities.length)];
+        case "$randomAlphaNumeric":
+          return Math.random().toString(36).substring(2, 12);
         default:
+          // Handle $randomInt(min, max)
+          if (trimmedKey.startsWith("$randomInt(") && trimmedKey.endsWith(")")) {
+            const parts = trimmedKey.substring(11, trimmedKey.length - 1).split(",");
+            if (parts.length === 2) {
+              const min = parseInt(parts[0].trim());
+              const max = parseInt(parts[1].trim());
+              if (!isNaN(min) && !isNaN(max)) {
+                return Math.floor(Math.random() * (max - min + 1) + min).toString();
+              }
+            }
+          }
           return match;
       }
     }

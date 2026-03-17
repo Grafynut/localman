@@ -119,10 +119,10 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab, hei
       className={`flex flex-col min-h-0 bg-background relative border-t border-border/50 ${!height ? 'flex-1' : ''}`}
       style={height ? { height: `${height}px`, maxHeight: '80vh' } : {}}
     >
-      <div className="flex items-center justify-between px-6 py-3 bg-surface/20 border-b border-border shrink-0">
+      <div className="flex items-center justify-between px-4 py-2 bg-surface/20 border-b border-border shrink-0">
         <span className="text-[11px] font-bold uppercase tracking-widest text-muted">Response</span>
         {reqResponse && (
-          <div className="flex items-center space-x-6 text-[12px] font-bold">
+          <div className="flex items-center space-x-4 text-[11px] font-bold">
             <div className="flex items-center space-x-2">
               <span className="text-muted font-medium">Status</span>
               <span className={`${reqResponse.status >= 200 && reqResponse.status < 300 ? "text-method-get" : "text-method-delete"}`}>
@@ -155,7 +155,7 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab, hei
           <button
             key={tab}
             onClick={() => setRespTab(tab)}
-            className={`px-4 py-3 text-[11px] font-bold uppercase tracking-wider transition-all relative ${respTab === tab ? "text-primary" : "text-muted hover:text-gray-300"}`}
+            className={`px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-all relative ${respTab === tab ? "text-primary" : "text-muted hover:text-gray-300"}`}
           >
             {tab === "Body" ? (
               <span className="flex items-center space-x-1">
@@ -227,7 +227,7 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab, hei
 
          {reqResponse && respTab === "Body" && (
           <div className="w-full h-full relative overflow-hidden flex flex-col bg-background">
-            <div className="flex items-center space-x-2 px-4 py-2 bg-surface/30 border-b border-border/50 shrink-0">
+            <div className="flex items-center space-x-2 px-3 py-1.5 bg-surface/30 border-b border-border/50 shrink-0">
               <div className="flex-1 flex items-center space-x-2">
                 <Search size={14} className="text-muted" />
                 <input
@@ -283,13 +283,13 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab, hei
                  </div>
                ) : (
                  <>
-                   <div className="shrink-0 w-12 bg-surface/5 border-r border-border text-right py-4 px-3 text-[12px] text-muted/30 font-mono select-none overflow-hidden">
+                   <div className="shrink-0 w-10 bg-surface/5 border-r border-border text-right py-3 px-2 text-[11px] text-muted/30 font-mono select-none overflow-hidden">
                     {body.split("\n").map((_, i) => (
                       <div key={i} className="h-[21px] leading-[21px]">{i + 1}</div>
                     ))}
                   </div>
                   <div className="flex-1 overflow-auto custom-scrollbar">
-                    <pre className="inline-block p-4 text-[14px] font-mono whitespace-pre leading-[21px] focus:outline-none selection:bg-primary/20">
+                    <pre className="inline-block p-3 text-[13px] font-mono whitespace-pre leading-[19px] focus:outline-none selection:bg-primary/20">
                       {"error" in reqResponse || body.startsWith("// Invalid JSONPath") ? <span className="text-method-delete">{body}</span> : highlightContent(body)}
                     </pre>
                   </div>
@@ -300,7 +300,7 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab, hei
         )}
 
         {reqResponse && respTab === "Headers" && (
-          <div className="p-4 font-mono text-[12px] text-gray-300">
+          <div className="p-3 font-mono text-[11px] text-gray-300">
             {headers.length === 0 ? (
               <div className="text-muted">No headers returned.</div>
             ) : (

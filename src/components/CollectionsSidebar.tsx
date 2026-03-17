@@ -59,6 +59,7 @@ type Props = {
   onRunCollection: (collection: Collection) => void;
   onRunFolder: (folder: Folder) => void;
   peersCount: number;
+  onHide?: () => void;
 };
 
 interface CollectionHeaderProps {
@@ -97,7 +98,7 @@ function CollectionHeader({
     <div
       ref={setNodeRef}
       onClick={onSelect}
-      className={`flex items-center px-4 py-2 cursor-pointer group transition-all ${active ? "bg-primary/5 text-primary border-l-2 border-primary" : "text-gray-400 hover:bg-surface-hover hover:text-gray-200"} ${isOver ? "bg-primary/15 ring-1 ring-primary/50 text-gray-100" : ""}`}
+      className={`flex items-center px-3 py-1.5 cursor-pointer group transition-all ${active ? "bg-primary/5 text-primary border-l-2 border-primary" : "text-gray-400 hover:bg-surface-hover hover:text-gray-200"} ${isOver ? "bg-primary/15 ring-1 ring-primary/50 text-gray-100" : ""}`}
     >
       <ChevronRight
         size={14}
@@ -236,7 +237,7 @@ function FolderItem({
     <div ref={setNodeRef} style={style} className="flex flex-col mb-1 group/folder">
       <div
         onClick={() => toggleFolderExpanded(folder.id)}
-        className={`flex items-center px-4 py-1.5 cursor-pointer group rounded transition-all ${isOver ? "bg-primary/15 ring-1 ring-primary/50 text-gray-100" : "text-gray-400 hover:bg-surface-hover hover:text-gray-200"}`}
+        className={`flex items-center px-3 py-1 cursor-pointer group rounded transition-all ${isOver ? "bg-primary/15 ring-1 ring-primary/50 text-gray-100" : "text-gray-400 hover:bg-surface-hover hover:text-gray-200"}`}
       >
         <div {...attributes} {...listeners} className="mr-1 opacity-0 group-hover/folder:opacity-40 hover:opacity-100 transition-opacity p-0.5 cursor-grab active:cursor-grabbing">
           <GripVertical size={12} />
@@ -397,7 +398,7 @@ function RequestItem({
     <div
       ref={setNodeRef}
       style={style}
-      className={`group/request flex items-center px-4 py-1.5 cursor-pointer transition-all border-l-2 ${activeRequestId === request.id
+      className={`group/request flex items-center px-3 py-1 cursor-pointer transition-all border-l-2 ${activeRequestId === request.id
         ? "bg-primary/5 border-primary text-gray-100"
         : "border-transparent text-gray-400 hover:text-gray-200 hover:bg-surface-hover/50"
         } ${isOver ? "bg-primary/10 ring-1 ring-primary/40 ring-inset" : ""}`}
@@ -526,6 +527,7 @@ export function CollectionsSidebar({
   onImportWorkspace,
   onHistory,
   peersCount,
+  onHide,
 }: Props) {
   const [openCollectionMenuId, setOpenCollectionMenuId] = useState<string | null>(null);
   const [openFolderMenuId, setOpenFolderMenuId] = useState<string | null>(null);
@@ -660,17 +662,17 @@ export function CollectionsSidebar({
       onDragEnd={handleDragEnd}
     >
       <div
-        className="w-[280px] bg-surface flex flex-col border-r border-border shrink-0 z-10"
+        className="w-[240px] bg-surface flex flex-col border-r border-border shrink-0 z-10"
         onClick={() => {
           setOpenCollectionMenuId(null);
           setOpenFolderMenuId(null);
           setOpenRequestMenuId(null);
         }}
       >
-        <div className="px-4 py-4 border-b border-border space-y-3">
+        <div className="px-3 py-3 border-b border-border space-y-2">
           <button
             onClick={onCreateCollection}
-            className="w-full h-9 flex gap-2 items-center justify-center bg-primary hover:bg-primary-hover text-white rounded-md transition-all text-[13px] font-semibold shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full h-8 flex gap-2 items-center justify-center bg-primary hover:bg-primary-hover text-white rounded-md transition-all text-[12px] font-semibold shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus size={16} strokeWidth={2.5} />
             <span>New Collection</span>
@@ -702,11 +704,23 @@ export function CollectionsSidebar({
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-2">
           <div className="mb-4">
-            <div className="px-4 py-2 flex items-center justify-between group cursor-default">
+            <div className="px-3 py-1.5 flex items-center justify-between group cursor-default">
               <span className="text-[11px] font-bold text-muted tracking-widest uppercase">
                 Collections
               </span>
               <div className="flex items-center space-x-1">
+                {onHide && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onHide();
+                    }}
+                    className="p-1 hover:bg-surface-hover rounded text-muted hover:text-primary transition-colors"
+                    title="Hide Sidebar (Ctrl+[)"
+                  >
+                    <ChevronRight size={14} className="rotate-180" />
+                  </button>
+                )}
                 <button
                   onClick={onPasteCollection}
                   className="p-1 hover:bg-surface-hover rounded text-muted hover:text-gray-200 transition-colors"

@@ -4,8 +4,9 @@
   --color-background: #090909;
   --color-surface: #121212;
   --color-surface-hover: #1C1C1C;
-  --color-primary: #FF6A13;
-  --color-primary-hover: #F55E00;
+  /* --color-primary: #FF6A13; */
+  --color-primary: #50ad5c;
+  --color-primary-hover: #459a50;
   --color-border: #212121;
   --color-muted: #6B6B6B;
 
@@ -55,7 +56,10 @@ select:focus {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
 .scrollbar-hide {
-  -ms-overflow-style: none; /* IE and Edge */
-  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none;
+  /* IE and Edge */
+  scrollbar-width: none;
+  /* Firefox */
 }

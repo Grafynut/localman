@@ -19,7 +19,9 @@ const SHORTCUTS = [
   {
     category: "Navigation",
     items: [
-      { label: "Toggle Sidebar", keys: ["Ctrl", "\\"] },
+      { label: "Toggle Left Sidebar", keys: ["Ctrl", "["] },
+      { label: "Toggle Right Inspector", keys: ["Ctrl", "]"] },
+      { label: "Toggle Left Sidebar (Alt)", keys: ["Ctrl", "\\"] },
       { label: "Focus Search", keys: ["Ctrl", "K"] },
     ]
   },

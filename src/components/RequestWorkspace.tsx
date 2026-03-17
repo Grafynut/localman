@@ -130,16 +130,16 @@ export function RequestWorkspace({
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-background relative selection:bg-primary/30">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-background">
-        <div className="flex flex-col space-y-1">
-          <div className="flex items-center space-x-2 text-[12px] text-muted font-bold uppercase tracking-widest">
-            <Folder size={14} className="text-primary" />
-            <span>{activeCollectionName || "No collection selected"}</span>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-background">
+        <div className="flex flex-col space-y-1 min-w-0">
+          <div className="flex items-center space-x-2 text-[11px] text-muted font-bold uppercase tracking-widest truncate">
+            <Folder size={12} className="text-primary shrink-0" />
+            <span className="truncate">{activeCollectionName || "No collection"}</span>
           </div>
-          <div className="flex items-center space-x-2 text-[18px] font-bold text-gray-100">
-            <span>{activeRequestName || "Select a request"}</span>
+          <div className="flex items-center space-x-2 text-[15px] font-bold text-gray-100 truncate">
+            <span className="truncate">{activeRequestName || "Untitled Request"}</span>
             {isDirty && (
-              <div className="w-2 h-2 rounded-full bg-primary mt-1 shadow-[0_0_8px_rgba(255,106,19,0.5)]" title="Unsaved changes"></div>
+              <div className="w-2 h-2 rounded-full bg-primary shrink-0 shadow-[0_0_8px_rgba(255,106,19,0.5)]" title="Unsaved changes"></div>
             )}
           </div>
         </div>
@@ -148,30 +148,30 @@ export function RequestWorkspace({
             onClick={onSaveRequest}
             disabled={isSavingRequest || (!isDirty && activeRequestName !== "")}
             title="Save Request (Ctrl+S)"
-            className={`h-9 px-4 rounded border font-semibold text-[13px] flex items-center space-x-2 transition-all active:scale-95 disabled:opacity-30 ${isDirty
+            className={`h-8 px-3 md:px-4 rounded border font-semibold text-[12px] flex items-center space-x-2 transition-all active:scale-95 disabled:opacity-30 ${isDirty
                 ? "bg-primary/10 border-primary text-primary hover:bg-primary/20"
                 : "bg-transparent border-border hover:bg-surface-hover text-gray-400"
               }`}
           >
             <Save size={14} strokeWidth={2.5} />
-            <span>{isSavingRequest ? "Saving..." : "Save"}</span>
+            <span className="hidden sm:inline">{isSavingRequest ? "Saving..." : "Save"}</span>
           </button>
           <button
             onClick={onCreateRequest}
-            className="h-9 px-4 rounded bg-primary text-white hover:bg-primary-hover font-bold text-[13px] flex items-center space-x-2 transition-all shadow-lg shadow-primary/10 active:scale-95"
+            className="h-8 px-3 md:px-4 rounded bg-primary text-white hover:bg-primary-hover font-bold text-[12px] flex items-center space-x-2 transition-all shadow-lg shadow-primary/10 active:scale-95"
           >
             <Plus size={16} strokeWidth={3} />
-            <span>New</span>
+            <span className="hidden sm:inline">New</span>
           </button>
         </div>
       </div>
 
-      <div className="px-6 py-4 bg-background border-b border-border shrink-0">
+      <div className="px-4 py-3 bg-background border-b border-border shrink-0">
         <div className="flex items-center bg-surface border border-border rounded-lg group focus-within:border-primary/50 focus-within:ring-4 focus-within:ring-primary/5 transition-all">
           <div className="relative shrink-0 flex items-center border-r border-border bg-surface-hover/30" ref={dropdownRef}>
             <button
               onClick={() => setIsMethodOpen(!isMethodOpen)}
-              className={`flex items-center space-x-2 h-10 px-6 font-black text-[13px] tracking-wide transition-all hover:bg-surface-hover/50 rounded-l-lg ${methodColor(reqMethod)}`}
+              className={`flex items-center space-x-1 md:space-x-2 h-9 px-3 md:px-5 font-black text-[12px] tracking-wide transition-all hover:bg-surface-hover/50 rounded-l-lg ${methodColor(reqMethod)}`}
             >
               <span>{reqMethod}</span>
               <ChevronDown
@@ -208,7 +208,7 @@ export function RequestWorkspace({
             value={reqUrl}
             onChange={setReqUrl}
             placeholder="https://api.example.com/v1/resource"
-            className="flex-1 w-full bg-transparent px-5 py-2.5 text-gray-100 placeholder-muted/50 focus:outline-none text-[15px] font-medium"
+            className="flex-1 w-full bg-transparent px-4 py-2 text-gray-100 placeholder-muted/50 focus:outline-none text-[14px] font-medium"
             environments={environments}
             activeEnvId={activeEnvId}
             onEnter={onSendRequest}
@@ -218,13 +218,13 @@ export function RequestWorkspace({
             onClick={onSendRequest}
             disabled={isSending || !reqUrl.trim()}
             title="Send Request (Ctrl+Enter)"
-            className="shrink-0 h-10 px-8 bg-primary hover:bg-primary-hover text-white font-black text-[14px] tracking-widest uppercase transition-all disabled:opacity-30 disabled:grayscale flex items-center space-x-2 active:scale-95 rounded-r-lg"
+            className="shrink-0 h-9 px-4 md:px-6 bg-primary hover:bg-primary-hover text-white font-black text-[12px] md:text-[13px] tracking-widest uppercase transition-all disabled:opacity-30 disabled:grayscale flex items-center space-x-2 active:scale-95 rounded-r-lg"
           >
             {isSending ? (
               <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
             ) : (
               <>
-                <span>Send</span>
+                <span className="hidden sm:inline">Send</span>
                 <Play size={14} fill="currentColor" strokeWidth={0} />
               </>
             )}
@@ -234,14 +234,14 @@ export function RequestWorkspace({
 
       <div className="flex-1 flex flex-col min-h-0 bg-background">
         <div className="flex-1 flex flex-col min-h-0 relative border-b border-border">
-          <div className="flex border-b border-border px-4 shrink-0 bg-surface/20">
+          <div className="flex border-b border-border px-4 shrink-0 bg-surface/20 overflow-x-auto custom-scrollbar-thin">
             {(
               ["Params", "Headers", "Body", "Pre-request", "Auth", "Tests", "Docs"] as const
             ).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveWorkspaceTab(tab)}
-                className={`px-4 py-3 text-[12px] font-bold uppercase tracking-wider transition-all relative
+                className={`px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-all relative
                   ${activeWorkspaceTab === tab
                     ? "text-primary"
                     : "text-muted hover:text-gray-300"
@@ -275,7 +275,7 @@ export function RequestWorkspace({
 
             {activeWorkspaceTab === "Body" && (
               <div className="flex-1 flex flex-col h-full bg-background overflow-hidden font-sans">
-                <div className="flex items-center space-x-4 px-4 py-2 border-b border-border bg-surface/30 shrink-0">
+                <div className="flex items-center space-x-4 px-3 py-1.5 border-b border-border bg-surface/30 shrink-0">
                   <div className="flex items-center space-x-1">
                     {(["none", "raw", "form-data", "binary"] as const).map((type) => (
                       <button

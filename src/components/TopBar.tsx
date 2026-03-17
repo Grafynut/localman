@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import logo from "../assets/logo.png";
-import { Activity, ChevronDown, Plus, Search, Settings, User, Users, Keyboard } from "lucide-react";
+import { Activity, ChevronDown, Plus, Search, Settings, User, Users, Keyboard, PanelLeft, PanelRight, Globe } from "lucide-react";
 import type { Workspace, Environment } from "../types";
 import { EnvironmentSelector } from "./EnvironmentSelector";
 
@@ -15,6 +15,11 @@ type Props = {
   onSetActiveEnv: (id: string | null) => void;
   onOpenEnvManager: () => void;
   onOpenShortcuts: () => void;
+  isSidebarVisible: boolean;
+  onToggleSidebar: () => void;
+  isInspectorVisible: boolean;
+  onToggleInspector: () => void;
+  onOpenGlobals: () => void;
 };
 
 export function TopBar({ 
@@ -27,7 +32,12 @@ export function TopBar({
   activeEnvId,
   onSetActiveEnv,
   onOpenEnvManager,
-  onOpenShortcuts
+  onOpenShortcuts,
+  isSidebarVisible,
+  onToggleSidebar,
+  isInspectorVisible,
+  onToggleInspector,
+  onOpenGlobals
 }: Props) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -49,13 +59,21 @@ export function TopBar({
   );
 
   return (
-    <div className="h-14 bg-surface border-b border-border flex items-center justify-between px-6 shrink-0 z-20">
-      <div className="flex items-center space-x-6">
-        <div className="flex items-center space-x-3 text-primary">
-          <div className="w-8 h-8 flex items-center justify-center">
+    <div className="h-12 bg-surface border-b border-border flex items-center justify-between px-4 shrink-0 z-20">
+      <div className="flex items-center space-x-3">
+        <button
+          onClick={onToggleSidebar}
+          className={`p-1.5 rounded-md transition-all active:scale-95 ${isSidebarVisible ? "text-primary bg-primary/10 border border-primary/20" : "text-muted hover:text-gray-200 border border-transparent hover:border-border"}`}
+          title="Toggle Sidebar (Ctrl+[)"
+        >
+          <PanelLeft size={18} />
+        </button>
+
+        <div className="flex items-center space-x-2 text-primary">
+          <div className="w-7 h-7 flex items-center justify-center">
             <img src={logo} alt="Localman Logo" className="w-full h-full object-contain" />
           </div>
-          <span className="font-black text-[18px] tracking-tight text-white uppercase italic">Localman</span>
+          <span className="font-black text-[16px] tracking-tight text-white uppercase italic">Localman</span>
         </div>
 
         <div className="relative" ref={dropdownRef}>
@@ -139,7 +157,7 @@ export function TopBar({
           <Plus size={16} />
         </button>
 
-        <div className="h-6 w-px bg-border/50 mx-2" />
+        <div className="h-5 w-px bg-border/50 mx-1" />
 
         <EnvironmentSelector 
           environments={environments}
@@ -149,7 +167,7 @@ export function TopBar({
         />
       </div>
 
-      <div className="flex-1 max-w-2xl px-12">
+      <div className="flex-1 max-w-xl px-4 md:px-8">
         <div className="relative group">
           <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
             <Search size={16} className="text-muted group-focus-within:text-primary transition-colors" />
@@ -157,19 +175,19 @@ export function TopBar({
           <input
             id="global-search-input"
             type="text"
-            placeholder="Search API resources, collections, environments..."
-            className="w-full bg-background border border-border text-[13px] rounded-full pl-11 pr-16 py-2 text-gray-200 placeholder-muted/50 focus:outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/5 transition-all font-medium"
+            placeholder="Search API..."
+            className="w-full bg-background border border-border text-[13px] rounded-full pl-11 pr-16 py-1.5 text-gray-200 placeholder-muted/50 focus:outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/5 transition-all font-medium"
           />
-          <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+          <div className="absolute inset-y-0 right-0 hidden md:flex items-center pr-3 pointer-events-none">
             <span className="text-[10px] font-black font-mono text-muted/60 bg-surface/80 px-2 py-0.5 rounded border border-border">⌘ K</span>
           </div>
         </div>
       </div>
 
-      <div className="flex items-center space-x-6 text-sm">
-        <div className="flex items-center space-x-2 bg-method-get/10 border border-method-get/20 px-3 py-1.5 rounded-full">
+      <div className="flex items-center space-x-4 text-sm">
+        <div className="flex items-center space-x-2 bg-method-get/10 border border-method-get/20 px-2 py-1 md:px-3 md:py-1.5 rounded-full">
           <span className="w-2 h-2 rounded-full bg-method-get shadow-[0_0_8px_rgba(12,187,82,0.4)] animate-pulse"></span>
-          <span className="text-method-get font-black text-[11px] uppercase tracking-widest">Connect: Online</span>
+          <span className="text-method-get font-black text-[11px] uppercase tracking-widest hidden lg:inline">Connect: Online</span>
         </div>
 
         <div className="flex items-center space-x-2 text-muted hover:text-gray-100 cursor-pointer transition-colors group">
@@ -191,9 +209,23 @@ export function TopBar({
           <Keyboard size={20} />
         </div>
 
+        <div onClick={onOpenGlobals} className="text-muted hover:text-primary cursor-pointer transition-all hover:scale-110 active:scale-90" title="Global Variables">
+          <Globe size={20} />
+        </div>
+
         <div className="text-muted hover:text-primary cursor-pointer transition-all hover:rotate-45 active:scale-90">
           <Settings size={20} />
         </div>
+
+        <div className="h-4 w-px bg-border"></div>
+
+        <button
+          onClick={onToggleInspector}
+          className={`p-1.5 rounded-md transition-all active:scale-95 ${isInspectorVisible ? "text-primary bg-primary/10 border border-primary/20" : "text-muted hover:text-gray-200 border border-transparent hover:border-border"}`}
+          title="Toggle Inspector (Ctrl+])"
+        >
+          <PanelRight size={18} />
+        </button>
       </div>
     </div>
   );

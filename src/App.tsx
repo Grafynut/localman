@@ -14,8 +14,6 @@ import type {
   Collection,
   Folder,
   HttpResponseResult,
-  ResponseState,
-  ResponseTab,
   StoredRequest,
   SyncAction,
   SyncEntityType,
@@ -41,8 +39,9 @@ import {
 import { EnvironmentManager } from "./components/EnvironmentManager";
 import { ImportModal } from "./components/ImportModal";
 import { HistoryPanel } from "./components/HistoryPanel";
-import { ShortcutsModal } from "./components/ShortcutsModal";
 import { CodeSnippetModal } from "./components/CodeSnippetModal";
+import { GlobalVariablesModal } from "./components/GlobalVariablesModal";
+import { ShortcutsModal } from "./components/ShortcutsModal";
 import { v4 as uuidv4 } from "uuid";
 import { parseCurl, parsePostman } from "./utils";
 import "./App.css";
@@ -79,6 +78,7 @@ function App() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isCodeSnippetOpen, setIsCodeSnippetOpen] = useState(false);
+  const [isGlobalsModalOpen, setIsGlobalsModalOpen] = useState(false);
 
   const [responseHeight, setResponseHeight] = useState(() => {
     const saved = localStorage.getItem("localman.responseHeight");
@@ -91,11 +91,9 @@ function App() {
   const [sharingPeerIp, setSharingPeerIp] = useState<string | null>(null);
 
   const [isSending, setIsSending] = useState(false);
-  const [globals, setGlobals] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem("localman.globals");
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [globals, setGlobals] = useState<Record<string, string>>({});
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+  const [isInspectorVisible, setIsInspectorVisible] = useState(true);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const collectionsRef = useRef<Collection[]>([]);
   const toastsRef = useRef<ToastMessage[]>([]);
@@ -666,10 +664,16 @@ function App() {
         searchInput?.focus();
       }
 
-      // Ctrl/Cmd + \: Toggle Sidebar
-      if (isMod && e.key === "\\") {
+      // Ctrl/Cmd + \ or Ctrl+[: Toggle Left Sidebar
+      if (isMod && (e.key === "\\" || e.key === "[")) {
         e.preventDefault();
         setIsSidebarVisible((prev) => !prev);
+      }
+      
+      // Ctrl/Cmd + ]: Toggle Right Inspector
+      if (isMod && e.key === "]") {
+        e.preventDefault();
+        setIsInspectorVisible((prev) => !prev);
       }
 
       // ?: Toggle Shortcuts Modal (only when not typing in an input)
@@ -2485,6 +2489,20 @@ function App() {
     }
   }
 
+  useEffect(() => {
+    const loadGlobals = async () => {
+      try {
+        const result = await invoke<string>("get_globals");
+        if (result) {
+          setGlobals(JSON.parse(result));
+        }
+      } catch (err) {
+        console.error("Failed to load global variables:", err);
+      }
+    };
+    loadGlobals();
+  }, []);
+
   const peersCount = Object.keys(peers).length;
 
   return (
@@ -2500,6 +2518,11 @@ function App() {
         onSetActiveEnv={handleSetActiveEnvironment}
         onOpenEnvManager={() => setIsEnvManagerOpen(true)}
         onOpenShortcuts={() => setIsShortcutsOpen(true)}
+        isSidebarVisible={isSidebarVisible}
+        onToggleSidebar={() => setIsSidebarVisible(!isSidebarVisible)}
+        isInspectorVisible={isInspectorVisible}
+        onToggleInspector={() => setIsInspectorVisible(!isInspectorVisible)}
+        onOpenGlobals={() => setIsGlobalsModalOpen(true)}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -2519,6 +2542,7 @@ function App() {
             onSelectRequest={(request) => {
               applyStoredRequest(request);
             }}
+            onHide={() => setIsSidebarVisible(false)}
             onCreateCollection={() => handleCreateCollectionClick()}
 
             onCreateFolder={(collectionId) => {
@@ -2684,15 +2708,18 @@ function App() {
           />
         </div>
 
-        <RightInspector
-          peers={peers}
-          activeCollectionName={activeCollection?.name || ""}
-          activeRequestsCount={activeRequests.length}
-          connectedPeerIps={connectedPeerIps}
-          sharingPeerIp={sharingPeerIp}
-          onTogglePeerConnection={handleTogglePeerConnection}
-          onSharePeer={handleSharePeer}
-        />
+        {isInspectorVisible && (
+          <RightInspector
+            peers={peers}
+            activeCollectionName={activeCollection?.name || ""}
+            activeRequestsCount={activeRequests.length}
+            connectedPeerIps={connectedPeerIps}
+            sharingPeerIp={sharingPeerIp}
+            onTogglePeerConnection={handleTogglePeerConnection}
+            onSharePeer={handleSharePeer}
+            onHide={() => setIsInspectorVisible(false)}
+          />
+        )}
       </div>
       <ToastViewport toasts={toasts} onDismiss={dismissToast} />
 
@@ -2772,6 +2799,24 @@ function App() {
         environments={environments}
         activeEnvId={activeEnvId}
       />
+
+      <GlobalVariablesModal
+        isOpen={isGlobalsModalOpen}
+        onClose={() => setIsGlobalsModalOpen(false)}
+        globals={globals}
+        onSave={async (newGlobals) => {
+          setGlobals(newGlobals);
+          try {
+            await invoke("update_globals", { variables: JSON.stringify(newGlobals) });
+            showToast({ kind: "success", title: "Globals Saved", description: "Global variables updated successfully" });
+          } catch (err) {
+            console.log("Failed to save globals:", err);
+            showToast({ kind: "error", title: "Save Failed", description: "Could not save global variables to backend" });
+          }
+        }}
+      />
+
+      <ToastViewport toasts={toasts} onDismiss={(id: number) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
     </div>
   );
 }

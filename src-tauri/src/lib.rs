@@ -68,6 +68,8 @@ pub async fn run() {
             db::save_history_entry,
             db::get_history,
             db::clear_history,
+            db::get_globals,
+            db::update_globals,
             http::execute_request,
             network::get_known_peers
         ])

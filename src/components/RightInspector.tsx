@@ -9,6 +9,7 @@ type Props = {
   sharingPeerIp: string | null;
   onTogglePeerConnection: (peerIp: string) => void;
   onSharePeer: (peerName: string, peerIp: string) => void;
+  onHide?: () => void;
 };
 
 export function RightInspector({
@@ -19,6 +20,7 @@ export function RightInspector({
   sharingPeerIp,
   onTogglePeerConnection,
   onSharePeer,
+  onHide,
 }: Props) {
   const [infoOpen, setInfoOpen] = useState(true);
   const [collabOpen, setCollabOpen] = useState(true);
@@ -32,15 +34,26 @@ export function RightInspector({
   }));
 
   return (
-    <div className="w-[300px] bg-surface flex flex-col border-l border-border shrink-0 z-10 selection:bg-primary/20">
+    <div className="w-[260px] bg-surface flex flex-col border-l border-border shrink-0 z-10 selection:bg-primary/20">
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="p-6 border-b border-border bg-surface/30">
-          <button onClick={() => setInfoOpen((prev) => !prev)} className="w-full flex items-center justify-between mb-4 group">
-            <h3 className="text-[11px] font-bold text-muted uppercase tracking-widest group-hover:text-gray-200 transition-colors">Collection Info</h3>
+        <div className="p-4 border-b border-border bg-surface/30">
+          <button onClick={() => setInfoOpen((prev) => !prev)} className="w-full flex items-center justify-between mb-3 group">
+            <div className="flex items-center space-x-2">
+               {onHide && (
+                 <button 
+                  onClick={(e) => { e.stopPropagation(); onHide(); }}
+                  className="p-1 hover:bg-surface-hover rounded text-muted hover:text-primary transition-colors"
+                  title="Hide Inspector (Ctrl+])"
+                 >
+                   <ChevronDown size={14} className="-rotate-90" />
+                 </button>
+               )}
+               <h3 className="text-[11px] font-bold text-muted uppercase tracking-widest group-hover:text-gray-200 transition-colors">Collection Info</h3>
+            </div>
             <ChevronDown size={14} className={`text-muted transition-transform ${infoOpen ? "" : "-rotate-90"}`} />
           </button>
           {infoOpen && (
-            <div className="space-y-4 text-[13px]">
+            <div className="space-y-3 text-[12px]">
               <div className="flex items-center justify-between">
                 <span className="text-muted font-medium">Author</span>
                 <span className="text-gray-200 font-bold">You</span>
@@ -57,34 +70,34 @@ export function RightInspector({
           )}
         </div>
 
-        <div className="p-6 border-b border-border bg-surface/10">
-          <button onClick={() => setCollabOpen((prev) => !prev)} className="w-full flex items-center justify-between mb-4 group">
+        <div className="p-4 border-b border-border bg-surface/10">
+          <button onClick={() => setCollabOpen((prev) => !prev)} className="w-full flex items-center justify-between mb-3 group">
             <h3 className="text-[11px] font-bold text-muted uppercase tracking-widest group-hover:text-gray-200 transition-colors">Collaboration</h3>
             <ChevronDown size={14} className={`text-muted transition-transform ${collabOpen ? "" : "-rotate-90"}`} />
           </button>
 
           {collabOpen && (
             <>
-              <div className="flex items-center justify-between mb-4 text-[11px] text-muted font-bold uppercase tracking-widest">
+              <div className="flex items-center justify-between mb-3 text-[11px] text-muted font-bold uppercase tracking-widest">
                 <span>LAN Devices</span>
                 <Monitor size={12} className="opacity-50" />
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {Object.keys(peers).length === 0 ? (
                   <div className="px-3 py-6 text-center text-[12px] text-muted font-medium border border-dashed border-border rounded-lg bg-background/50">
                     Scanning for peers...
                   </div>
                 ) : (
                   Object.entries(peers).map(([name, ip]) => (
-                    <div key={name} className="p-3 bg-background border border-border rounded-xl group transition-all hover:border-primary/30">
+                    <div key={name} className="p-2 bg-background border border-border rounded-xl group transition-all hover:border-primary/30">
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center space-x-3">
-                          <div className="w-8 h-8 rounded-lg bg-surface-hover flex items-center justify-center border border-border group-hover:border-primary/20 transition-colors">
-                            <Monitor size={16} className="text-muted group-hover:text-primary" />
+                          <div className="w-7 h-7 rounded-lg bg-surface-hover flex items-center justify-center border border-border group-hover:border-primary/20 transition-colors">
+                            <Monitor size={14} className="text-muted group-hover:text-primary" />
                           </div>
                           <div className="flex flex-col min-w-0">
-                            <span className="text-[13px] text-gray-100 font-bold truncate" title={ip}>{name.split(".")[0]}</span>
+                            <span className="text-[12px] text-gray-100 font-bold truncate" title={ip}>{name.split(".")[0]}</span>
                             <span className="text-[10px] text-primary/70 font-black font-mono tracking-wider">{ip}</span>
                           </div>
                         </div>
@@ -96,7 +109,7 @@ export function RightInspector({
                           className={`flex-1 py-1.5 border text-[11px] font-black uppercase tracking-widest rounded-lg transition-all active:scale-95 ${
                             connectedPeerIps[ip]
                               ? "bg-method-get/10 border-method-get/20 text-method-get"
-                              : "bg-surface-hover border-border hover:border-muted text-gray-300"
+                              : "bg-surface-hover border-border hover:border-muted text-gray-400"
                           }`}
                         >
                           {connectedPeerIps[ip] ? "Online" : "Connect"}
@@ -117,8 +130,8 @@ export function RightInspector({
           )}
         </div>
 
-        <div className="p-6">
-          <button onClick={() => setTeamOpen((prev) => !prev)} className="w-full flex items-center justify-between mb-4 group">
+        <div className="p-4">
+          <button onClick={() => setTeamOpen((prev) => !prev)} className="w-full flex items-center justify-between mb-3 group">
             <h3 className="text-[11px] font-bold text-muted uppercase tracking-widest group-hover:text-gray-200 transition-colors">Team Members</h3>
             <ChevronDown size={14} className={`text-muted transition-transform ${teamOpen ? "" : "-rotate-90"}`} />
           </button>
@@ -126,7 +139,7 @@ export function RightInspector({
             <div className="space-y-5">
               <div className="flex items-center justify-between text-[13px] group">
                 <div className="flex items-center space-x-3">
-                  <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/30 text-primary flex items-center justify-center font-black text-[10px] shadow-lg shadow-primary/5">YOU</div>
+                  <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/30 text-primary flex items-center justify-center font-black text-[9px] shadow-lg shadow-primary/5">YOU</div>
                   <span className="text-gray-200 font-bold">You</span>
                 </div>
                 <span className="text-muted text-[11px] font-bold uppercase tracking-wider">Owner</span>

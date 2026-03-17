@@ -49,17 +49,17 @@ export function FormDataEditor({ items, setItems, environments, activeEnvId }: P
       <table className="w-full table-fixed border-collapse">
         <thead className="sticky top-0 z-10 bg-surface/50 text-[10px] text-muted font-black uppercase tracking-widest">
           <tr className="border-b border-border">
-            <th className="w-12 py-3 border-r border-border"></th>
-            <th className="w-[30%] py-3 px-4 border-r border-border text-left">
+            <th className="w-10 py-2 border-r border-border"></th>
+            <th className="w-[30%] py-2 px-3 border-r border-border text-left">
               Key
             </th>
-            <th className="w-[10%] py-3 px-4 border-r border-border text-left">
+            <th className="w-[10%] py-2 px-3 border-r border-border text-left">
               Type
             </th>
-            <th className="w-[50%] py-3 px-4 border-r border-border text-left">
+            <th className="w-[50%] py-2 px-3 border-r border-border text-left">
               Value
             </th>
-            <th className="w-12 py-3"></th>
+            <th className="w-10 py-2"></th>
           </tr>
         </thead>
         <tbody>
@@ -85,14 +85,14 @@ export function FormDataEditor({ items, setItems, environments, activeEnvId }: P
                   value={item.key}
                   onChange={(e) => updateItem(index, "key", e.target.value)}
                   placeholder="Key"
-                  className="w-full bg-transparent px-4 py-3 text-[13px] text-gray-100 placeholder-muted/30 focus:outline-none focus:bg-primary/5 font-bold transition-all"
+                  className="w-full bg-transparent px-3 py-2 text-[12px] text-gray-100 placeholder-muted/30 focus:outline-none focus:bg-primary/5 font-bold transition-all"
                 />
               </td>
               <td className="border-r border-border align-middle p-0">
                 <select
                   value={item.type}
                   onChange={(e) => updateItem(index, "type", e.target.value as "text" | "file")}
-                  className="w-full bg-transparent px-2 py-3 text-[11px] text-muted font-bold uppercase tracking-wider focus:outline-none bg-surface/10 cursor-pointer"
+                  className="w-full bg-transparent px-2 py-2 text-[11px] text-muted font-bold uppercase tracking-wider focus:outline-none bg-surface/10 cursor-pointer"
                 >
                   <option value="text">Text</option>
                   <option value="file">File</option>
@@ -104,7 +104,7 @@ export function FormDataEditor({ items, setItems, environments, activeEnvId }: P
                     <div className="flex-1 flex items-center px-4 py-1.5 space-x-2">
                        <button 
                         onClick={() => handleFileSelect(index)}
-                        className="flex items-center space-x-2 bg-surface hover:bg-surface-hover border border-border px-3 py-1.5 rounded text-[12px] text-gray-300 transition-colors"
+                         className="flex items-center space-x-2 bg-surface hover:bg-surface-hover border border-border px-2 py-1 rounded text-[11px] text-gray-300 transition-colors"
                        >
                          <File size={14} className="text-primary" />
                          <span>{item.value ? (item.value.split(/[\\/]/).pop()) : "Select File"}</span>
@@ -122,7 +122,7 @@ export function FormDataEditor({ items, setItems, environments, activeEnvId }: P
                       placeholder="Value"
                       environments={environments}
                       activeEnvId={activeEnvId}
-                      className="w-full bg-transparent px-4 py-3 text-[13px] text-primary/90 placeholder-muted/30 focus:outline-none focus:bg-primary/5 font-mono selection:bg-primary/30 transition-all"
+                      className="w-full bg-transparent px-3 py-2 text-[12px] text-primary/90 placeholder-muted/30 focus:outline-none focus:bg-primary/5 font-mono selection:bg-primary/30 transition-all"
                     />
                   )}
                 </div>
