@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from "react";
+import logo from "../assets/logo.png";
 import { Activity, ChevronDown, Plus, Search, Settings, User, Users, Keyboard } from "lucide-react";
 import type { Workspace, Environment } from "../types";
 import { EnvironmentSelector } from "./EnvironmentSelector";
@@ -51,12 +52,10 @@ export function TopBar({
     <div className="h-14 bg-surface border-b border-border flex items-center justify-between px-6 shrink-0 z-20">
       <div className="flex items-center space-x-6">
         <div className="flex items-center space-x-3 text-primary">
-          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-primary/20">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-            </svg>
+          <div className="w-8 h-8 flex items-center justify-center">
+            <img src={logo} alt="Localman Logo" className="w-full h-full object-contain" />
           </div>
-          <span className="font-black text-[18px] tracking-tight text-white uppercase italic">DevCollab</span>
+          <span className="font-black text-[18px] tracking-tight text-white uppercase italic">Localman</span>
         </div>
 
         <div className="relative" ref={dropdownRef}>

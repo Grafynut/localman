@@ -51,8 +51,8 @@ import { executeScript } from "./utils/sandbox";
 
 function App() {
   const LOCAL_USER_ID = "local_user_1";
-  const INTERNAL_CLIPBOARD_KEY = "devcollab.internalClipboard";
-  const DEVICE_ID_KEY = "devcollab.deviceId";
+  const INTERNAL_CLIPBOARD_KEY = "localman.internalClipboard";
+  const DEVICE_ID_KEY = "localman.deviceId";
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>("default_workspace");
@@ -81,7 +81,7 @@ function App() {
   const [isCodeSnippetOpen, setIsCodeSnippetOpen] = useState(false);
 
   const [responseHeight, setResponseHeight] = useState(() => {
-    const saved = localStorage.getItem("devcollab.responseHeight");
+    const saved = localStorage.getItem("localman.responseHeight");
     return saved ? parseInt(saved, 10) : 320;
   });
   const [isResizing, setIsResizing] = useState(false);
@@ -92,7 +92,7 @@ function App() {
 
   const [isSending, setIsSending] = useState(false);
   const [globals, setGlobals] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem("devcollab.globals");
+    const saved = localStorage.getItem("localman.globals");
     return saved ? JSON.parse(saved) : {};
   });
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
@@ -144,7 +144,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("devcollab.globals", JSON.stringify(globals));
+    localStorage.setItem("localman.globals", JSON.stringify(globals));
   }, [globals]);
 
   const activeCollection = useMemo(
@@ -195,7 +195,7 @@ function App() {
           name: 'Workspace JSON',
           extensions: ['json']
         }],
-        defaultPath: "devcollab-workspace.json"
+        defaultPath: "localman-workspace.json"
       });
 
       if (!path) return;
@@ -345,7 +345,7 @@ function App() {
 
     const handleMouseUp = () => {
       setIsResizing(false);
-      localStorage.setItem("devcollab.responseHeight", responseHeight.toString());
+      localStorage.setItem("localman.responseHeight", responseHeight.toString());
     };
 
     window.addEventListener("mousemove", handleMouseMove);
