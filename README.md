@@ -2,7 +2,7 @@
 
 Localman is a high-performance, lightweight API development platform built with **Rust**, **Tauri**, and **React**. It orients around speed, security, and a premium developer experience, providing a full suite of tools for designing, testing, and debugging HTTP and WebSocket connections.
 
-![Localman Official Logo](file:///C:/Users/subha/.gemini/antigravity/brain/1f13863f-f995-4e95-a515-45b51bc92f1e/localman_logo_final_orange_1773579611927.png)
+![Localman Official Logo](./public/logo.png)
 
 ## ✨ Key Features
 
@@ -48,7 +48,7 @@ Localman is a high-performance, lightweight API development platform built with 
 
 1. **Clone & Install**:
    ```bash
-   git clone https://github.com/your-username/localman.git
+   git clone https://github.com/Grafynut/localman.git
    cd localman
    pnpm install
    ```
@@ -82,7 +82,9 @@ pm.test("Status is 200", () => {
 pm.environment.set("token", pm.response.json().access_token);
 ```
 
-## 🤝 Contributing & License
+## 🤝 Contributing & Author
+
+**Author:** [Subhajit](https://github.com/Grafynut)
 
 We welcome contributions! Please refer to [CONTRIBUTING.md](CONTRIBUTING.md).
 Licensed under the [MIT License](LICENSE).

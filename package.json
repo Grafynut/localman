@@ -2,6 +2,7 @@
   "name": "localman",
   "private": true,
   "version": "0.1.0",
+  "author": "Subhajit",
   "type": "module",
   "scripts": {
     "dev": "vite",
