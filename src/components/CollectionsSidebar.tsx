@@ -662,7 +662,7 @@ export function CollectionsSidebar({
       onDragEnd={handleDragEnd}
     >
       <div
-        className="w-[240px] bg-surface flex flex-col border-r border-border shrink-0 z-10"
+        className="w-full bg-surface flex flex-col border-r border-border shrink-0 z-10"
         onClick={() => {
           setOpenCollectionMenuId(null);
           setOpenFolderMenuId(null);

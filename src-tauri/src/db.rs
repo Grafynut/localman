@@ -17,7 +17,7 @@ pub fn init_db(
     if !app_dir.exists() {
         fs::create_dir_all(&app_dir)?;
     }
-    let db_path = app_dir.join("devcollab.db");
+    let db_path = app_dir.join("localman.db");
     println!("Initializing database at: {:?}", db_path);
     let conn = Connection::open(db_path)?;
 
@@ -30,7 +30,7 @@ pub fn init_db(
             email TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        INSERT OR IGNORE INTO users (id, name, email) VALUES ('local_user_1', 'Local Dev', 'local@devcollab.localhost');
+        INSERT OR IGNORE INTO users (id, name, email) VALUES ('local_user_1', 'Local Dev', 'local@localman.localhost');
 
         CREATE TABLE IF NOT EXISTS workspaces (
             id TEXT PRIMARY KEY,
@@ -1051,7 +1051,7 @@ pub fn get_requests_by_collection(
 
 #[tauri::command]
 pub fn health_check() -> String {
-    "DevCollab Core Engine is running!".to_string()
+    "localman Core Engine is running!".to_string()
 }
 
 #[tauri::command]

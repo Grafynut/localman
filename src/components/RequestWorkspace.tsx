@@ -126,7 +126,7 @@ export function RequestWorkspace({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH"];
+  const METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "WS"];
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-background relative selection:bg-primary/30">

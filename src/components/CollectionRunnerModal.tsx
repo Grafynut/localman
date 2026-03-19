@@ -1,11 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect } from "react";
 import { 
   Play, 
   Pause, 
   Square, 
   X, 
-  ChevronRight, 
-  ChevronDown, 
   CheckCircle2, 
   XCircle, 
   Clock, 
@@ -13,7 +11,7 @@ import {
   Settings2,
   ListRestart
 } from "lucide-react";
-import type { StoredRequest, RunnerStatus, RunnerReport, RunnerResult, TestResult, Environment } from "../types";
+import type { StoredRequest, RunnerStatus, RunnerReport, Environment } from "../types";
 import { methodColor } from "../utils";
 
 type Props = {

@@ -73,6 +73,8 @@ export type TabState = {
   binaryFilePath: string | null;
   lastResponse?: ResponseState;
   lastRespTab?: ResponseTab;
+  wsMessages?: WsMessage[];
+  wsStatus?: "disconnected" | "connecting" | "connected" | "error";
 };
 
 export type WorkspaceTab = "Params" | "Headers" | "Body" | "Pre-request" | "Auth" | "Tests" | "Docs";
@@ -103,6 +105,20 @@ export type HttpErrorResult = {
 };
 
 export type ResponseState = HttpResponseResult | HttpErrorResult | null;
+
+export type WsMessage = {
+  id: string;
+  connection_id: string;
+  content: string;
+  is_sent: boolean;
+  timestamp: string;
+};
+
+export type WsStatus = {
+  connection_id: string;
+  status: "connecting" | "connected" | "disconnected" | "error";
+  error?: string;
+};
 
 export type SyncAction = "Create" | "Update" | "Delete";
 export type SyncEntityType = "Collection" | "Folder" | "Request";

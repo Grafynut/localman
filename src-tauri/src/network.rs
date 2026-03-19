@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 use tauri::Emitter;
 
-const SERVICE_TYPE: &str = "_devcollab._tcp.local.";
+const SERVICE_TYPE: &str = "_localman._tcp.local.";
 const STALE_PEER_SECONDS: u64 = 12;
 
 #[derive(Clone)]
@@ -67,7 +67,7 @@ pub fn start_mdns(
         .collect::<Vec<_>>();
 
     let mut properties = HashMap::new();
-    properties.insert("app".to_string(), "devcollab".to_string());
+    properties.insert("app".to_string(), "localman".to_string());
 
     let ip_addr = ip_addrs
         .iter()
@@ -88,7 +88,7 @@ pub fn start_mdns(
 
     mdns.register(service_info).map_err(|e| e.to_string())?;
     println!(
-        "Broadcasted DevCollab instance '{}' on {}:{}",
+        "Broadcasted localman instance '{}' on {}:{}",
         instance_name, ip_addr, port
     );
 

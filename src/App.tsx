@@ -9,6 +9,7 @@ import { ResponsePanel } from "./components/ResponsePanel";
 import { RightInspector } from "./components/RightInspector";
 import { TopBar } from "./components/TopBar";
 import { RequestTabs } from "./components/RequestTabs";
+import { WebSocketWorkspace } from "./components/WebSocketWorkspace";
 import { ToastViewport, type ToastMessage } from "./components/ToastViewport";
 import type {
   Collection,
@@ -47,6 +48,7 @@ import { parseCurl, parsePostman } from "./utils";
 import "./App.css";
 import { invoke } from "@tauri-apps/api/core";
 import { executeScript } from "./utils/sandbox";
+import { Play } from "lucide-react";
 
 function App() {
   const LOCAL_USER_ID = "local_user_1";
@@ -61,7 +63,7 @@ function App() {
   const [expandedCollections, setExpandedCollections] = useState<Record<string, boolean>>({});
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [requestsByCollection, setRequestsByCollection] = useState<Record<string, StoredRequest[]>>({});
-  
+
   // Tab State
   const [openTabs, setOpenTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -85,6 +87,12 @@ function App() {
     return saved ? parseInt(saved, 10) : 320;
   });
   const [isResizing, setIsResizing] = useState(false);
+
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem("localman.sidebarWidth");
+    return saved ? parseInt(saved, 10) : 260;
+  });
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
 
   const [peers, setPeers] = useState<Record<string, string>>({});
   const [connectedPeerIps, setConnectedPeerIps] = useState<Record<string, boolean>>({});
@@ -315,8 +323,8 @@ function App() {
   // Update tab dirty state whenever it changes
   useEffect(() => {
     if (activeTabId) {
-      setOpenTabs((prev) => 
-        prev.map((tab) => 
+      setOpenTabs((prev) =>
+        prev.map((tab) =>
           tab.id === activeTabId ? { ...tab, isDirty } : tab
         )
       );
@@ -329,21 +337,37 @@ function App() {
     setIsResizing(true);
   }, []);
 
+  const handleSidebarResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingSidebar(true);
+  }, []);
+
   useEffect(() => {
-    if (!isResizing) return;
+    if (!isResizing && !isResizingSidebar) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      // Calculate new height based on mouse position from the bottom of the window
-      // We want to keep it between a min and max range
-      const newHeight = window.innerHeight - e.clientY;
-      if (newHeight > 100 && newHeight < window.innerHeight * 0.8) {
-        setResponseHeight(newHeight);
+      if (isResizing) {
+        const newHeight = window.innerHeight - e.clientY;
+        if (newHeight > 100 && newHeight < window.innerHeight * 0.8) {
+          setResponseHeight(newHeight);
+        }
+      } else if (isResizingSidebar) {
+        const newWidth = e.clientX;
+        if (newWidth > 200 && newWidth < 400) {
+          setSidebarWidth(newWidth);
+        }
       }
     };
 
     const handleMouseUp = () => {
-      setIsResizing(false);
-      localStorage.setItem("localman.responseHeight", responseHeight.toString());
+      if (isResizing) {
+        setIsResizing(false);
+        localStorage.setItem("localman.responseHeight", responseHeight.toString());
+      }
+      if (isResizingSidebar) {
+        setIsResizingSidebar(false);
+        localStorage.setItem("localman.sidebarWidth", sidebarWidth.toString());
+      }
     };
 
     window.addEventListener("mousemove", handleMouseMove);
@@ -352,7 +376,7 @@ function App() {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [isResizing, responseHeight]);
+  }, [isResizing, isResizingSidebar, responseHeight, sidebarWidth]);
 
   useEffect(() => {
     // We'll let the activeWorkspaceId useEffect handle the initial fetch
@@ -448,9 +472,7 @@ function App() {
           const created = await invoke<StoredRequest>("create_request", {
             id: requestId,
             collectionId,
-            collection_id: collectionId,
             folderId,
-            folder_id: folderId,
             name: name.trim(),
             method: "GET", // Default method
             url: "", // Default URL
@@ -509,14 +531,19 @@ function App() {
     setRunnerStatus("running");
     runnerStopRef.current = false;
     runnerPauseRef.current = false;
-    
+
     const results: RunnerResult[] = [];
     let totalTime = 0;
     let passedCount = 0;
     let failedCount = 0;
 
     const runRequests = runnerRequests.filter(r => config.requestIds.includes(r.id));
-    
+
+    // Initialize environment and globals for the run
+    const startEnv = environments.find(e => e.id === config.environmentId) || null;
+    let currentEnvVars = startEnv ? JSON.parse(startEnv.variables) : {};
+    let currentGlobalVars = { ...globals };
+
     for (let i = 0; i < config.iterations; i++) {
       for (const req of runRequests) {
         if (runnerStopRef.current) break;
@@ -527,46 +554,89 @@ function App() {
         if (runnerStopRef.current) break;
 
         try {
-          const runEnv = environments.find(e => e.id === config.environmentId) || null;
-          const envVars = runEnv ? JSON.parse(runEnv.variables) : {};
+          const resolutionContext = { ...currentGlobalVars, ...currentEnvVars };
           const headers = req.headers ? JSON.parse(req.headers) : {};
+          const resolvedHeaders: Record<string, string> = {};
+          Object.entries(headers).forEach(([k, v]) => {
+            resolvedHeaders[k] = resolveVariables(String(v), resolutionContext);
+          });
+
+          let finalUrl = resolveVariables(req.url, resolutionContext);
+          let resolvedBody = req.body ? resolveVariables(req.body, resolutionContext) : null;
+
+          // Pre-request Script
+          if (req.pre_request_script) {
+            const preContext = {
+              environment: { ...currentEnvVars },
+              globals: { ...currentGlobalVars },
+              request: {
+                url: finalUrl,
+                method: req.method,
+                headers: resolvedHeaders,
+                body: resolvedBody,
+              }
+            };
+            const preResult = executeScript(req.pre_request_script, preContext);
+            currentEnvVars = { ...preResult.environmentMutations };
+            currentGlobalVars = { ...preResult.globalMutations };
+            finalUrl = preResult.requestMutations.url;
+            Object.assign(resolvedHeaders, preResult.requestMutations.headers);
+            resolvedBody = preResult.requestMutations.body;
+          }
 
           const res = await invoke<HttpResponseResult>("execute_request", {
             params: {
               method: req.method,
-              url: resolveVariables(req.url, envVars),
-              headers: headers,
-              body: req.body,
+              url: finalUrl,
+              headers: resolvedHeaders,
+              body: resolvedBody,
               body_type: req.body_type || "none",
-              form_data: req.form_data ? JSON.parse(req.form_data) : [],
-              binary_file_path: req.binary_file_path,
+              form_data: req.form_data ? JSON.parse(req.form_data).map((entry: any) => ({
+                ...entry,
+                key: resolveVariables(entry.key, resolutionContext),
+                value: entry.type === "text" ? resolveVariables(entry.value, resolutionContext) : entry.value
+              })) : [],
+              binary_file_path: req.binary_file_path ? resolveVariables(req.binary_file_path, resolutionContext) : null,
             }
           });
 
           let tests: any[] = [];
           let passed = true;
           if (req.post_request_script) {
-             const context = {
-               environment: envVars,
-               globals: globals,
-               request: {
-                 url: req.url,
-                 method: req.method,
-                 headers: headers,
-                 body: req.body || null,
-               },
-               response: {
-                 status: res.status,
-                 body: res.body,
-                 headers: res.headers || {},
-               }
-             };
-             const scriptRes = executeScript(req.post_request_script, context);
-             tests = scriptRes.testResults || [];
-             passed = tests.every(t => t.passed);
-             if (scriptRes.globalMutations) {
-                setGlobals(scriptRes.globalMutations);
+            const postContext = {
+              environment: { ...currentEnvVars },
+              globals: { ...currentGlobalVars },
+              request: {
+                url: finalUrl,
+                method: req.method,
+                headers: resolvedHeaders,
+                body: resolvedBody,
+              },
+              response: {
+                status: res.status,
+                body: res.body,
+                headers: res.headers || {},
               }
+            };
+            const postResult = executeScript(req.post_request_script, postContext);
+            tests = postResult.testResults || [];
+            passed = tests.every(t => t.passed);
+            currentEnvVars = { ...postResult.environmentMutations };
+            currentGlobalVars = { ...postResult.globalMutations };
+          }
+
+          // Update app state for visibility
+          setGlobals(currentGlobalVars);
+          if (config.environmentId) {
+            const updatedVariables = JSON.stringify(currentEnvVars);
+            setEnvironments(prev => prev.map(env =>
+              env.id === config.environmentId ? { ...env, variables: updatedVariables } : env
+            ));
+            void invoke("update_environment", {
+              id: config.environmentId,
+              name: startEnv?.name || "",
+              variables: updatedVariables,
+            });
           }
 
           const result: RunnerResult = {
@@ -669,7 +739,7 @@ function App() {
         e.preventDefault();
         setIsSidebarVisible((prev) => !prev);
       }
-      
+
       // Ctrl/Cmd + ]: Toggle Right Inspector
       if (isMod && e.key === "]") {
         e.preventDefault();
@@ -785,9 +855,6 @@ function App() {
     setExpandedCollections((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
-  function dismissToast(id: number) {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  }
 
   function toggleFolderExpanded(id: string) {
     setExpandedFolders((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -1392,7 +1459,6 @@ function App() {
             id: generateId(),
             name: name.trim(),
             ownerId: LOCAL_USER_ID,
-            owner_id: LOCAL_USER_ID,
           });
 
           setWorkspaces((prev) => [...prev, newWs]);
@@ -1441,7 +1507,6 @@ function App() {
     try {
       const requests = await invoke<StoredRequest[]>("get_requests_by_collection", {
         collectionId,
-        collection_id: collectionId,
       });
 
       setRequestsByCollection((prev) => ({ ...prev, [collectionId]: requests }));
@@ -1480,9 +1545,7 @@ function App() {
       await invoke("update_request_location", {
         id: requestId,
         collectionId: targetCollectionId,
-        collection_id: targetCollectionId,
         folderId: targetFolderId,
-        folder_id: targetFolderId,
         position: targetPosition
       });
 
@@ -1535,7 +1598,6 @@ function App() {
       await invoke("update_folder_location", {
         id: folderId,
         collectionId: targetCollectionId,
-        collection_id: targetCollectionId,
         position: targetPosition
       });
 
@@ -1582,10 +1644,8 @@ function App() {
           const newCollection = await invoke<Collection>("create_collection", {
             id: generateId(),
             workspaceId: activeWorkspaceId,
-            workspace_id: activeWorkspaceId,
             name: name.trim(),
             ownerId: LOCAL_USER_ID,
-            owner_id: LOCAL_USER_ID,
           });
 
           setCollections((prev) => [...prev, newCollection]);
@@ -1656,7 +1716,6 @@ function App() {
           void broadcastSyncEvent("Create", "Collection", duplicated.id, duplicated);
           const duplicatedRequests = await invoke<StoredRequest[]>("get_requests_by_collection", {
             collectionId: duplicated.id,
-            collection_id: duplicated.id,
           });
           duplicatedRequests.forEach((request) => {
             void broadcastSyncEvent("Create", "Request", request.id, request);
@@ -1726,18 +1785,15 @@ function App() {
         try {
           const duplicated = await invoke<Folder>("duplicate_folder", {
             sourceId: folder.id,
-            source_id: folder.id,
             newId,
-            new_id: newId,
             newName: name.trim(),
-            new_name: name.trim(),
           });
           setFoldersByCollection((prev) => ({
             ...prev,
             [duplicated.collection_id]: [...(prev[duplicated.collection_id] || []), duplicated]
           }));
           setExpandedFolders((prev) => ({ ...prev, [duplicated.id]: true }));
-          
+
           await fetchRequests(duplicated.collection_id);
           showToast({
             kind: "success",
@@ -1793,7 +1849,6 @@ function App() {
     try {
       const requests = await invoke<StoredRequest[]>("get_requests_by_collection", {
         collectionId: activeCollection.id,
-        collection_id: activeCollection.id,
       });
       const events: SyncEvent[] = [
         createSyncEvent("Create", "Collection", activeCollection.id, activeCollection),
@@ -1860,11 +1915,8 @@ function App() {
         try {
           const duplicated = await invoke<StoredRequest>("duplicate_request", {
             sourceId: request.id,
-            source_id: request.id,
             newId,
-            new_id: newId,
             newName: name.trim(),
-            new_name: name.trim(),
           });
           setRequestsByCollection((prev) => {
             const current = prev[duplicated.collection_id] || [];
@@ -1903,10 +1955,10 @@ function App() {
           setOpenTabs(tabs => {
             const nextTabs = tabs.filter(t => t.requestId !== request.id);
             if (nextTabs.length !== tabs.length) {
-                // We closed at least one tab. If activeTabId was closed, select the last one.
-                if (!nextTabs.find(t => t.id === activeTabId)) {
-                    setActiveTabId(nextTabs.length > 0 ? nextTabs[nextTabs.length - 1].id : null);
-                }
+              // We closed at least one tab. If activeTabId was closed, select the last one.
+              if (!nextTabs.find(t => t.id === activeTabId)) {
+                setActiveTabId(nextTabs.length > 0 ? nextTabs[nextTabs.length - 1].id : null);
+              }
             }
             return nextTabs;
           });
@@ -2243,7 +2295,7 @@ function App() {
         const activeEnv = environments.find(e => e.id === activeEnvId);
         if (activeEnv) {
           const updatedVariables = JSON.stringify(preResult.environmentMutations);
-          setEnvironments(prev => prev.map(env => 
+          setEnvironments(prev => prev.map(env =>
             env.id === activeEnvId ? { ...env, variables: updatedVariables } : env
           ));
           void invoke("update_environment", {
@@ -2280,15 +2332,15 @@ function App() {
           environment: { ...envData },
           globals: { ...currentGlobals },
           request: {
-             url: finalUrl,
-             method: activeTab.method,
-             headers: resolvedHeaders,
-             body: resolvedBody,
+            url: finalUrl,
+            method: activeTab.method,
+            headers: resolvedHeaders,
+            body: resolvedBody,
           },
           response: {
-             status: response.status,
-             body: response.body,
-             headers: response.headers || {},
+            status: response.status,
+            body: response.body,
+            headers: response.headers || {},
           }
         };
         const postResult = executeScript(activeTab.postRequestScript, postContext);
@@ -2305,8 +2357,8 @@ function App() {
         setGlobals(postResult.globalMutations);
       }
 
-      setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { 
-        ...t, 
+      setOpenTabs(prev => prev.map(t => t.id === activeTabId ? {
+        ...t,
         lastResponse: finalResponse,
         lastRespTab: (testResults && testResults.length > 0) ? "Tests" : (t.lastRespTab || "Body")
       } : t));
@@ -2361,20 +2413,20 @@ function App() {
     if (!activeTabId) return; // Must have an active tab to restore into
 
     setOpenTabs(prev => prev.map(tab => {
-        if (tab.id !== activeTabId) return tab;
-        return {
-            ...tab,
-            method: entry.method,
-            url: entry.url,
-            body: entry.request_body || null,
-            headers: entry.request_headers ? parseHeadersToRows(entry.request_headers) : tab.headers,
-            bodyType: (entry.body_type as any) || "raw",
-            formData: parseFormDataToRows(entry.form_data),
-            binaryFilePath: entry.binary_file_path || null,
-            isDirty: true
-        };
+      if (tab.id !== activeTabId) return tab;
+      return {
+        ...tab,
+        method: entry.method,
+        url: entry.url,
+        body: entry.request_body || null,
+        headers: entry.request_headers ? parseHeadersToRows(entry.request_headers) : tab.headers,
+        bodyType: (entry.body_type as any) || "raw",
+        formData: parseFormDataToRows(entry.form_data),
+        binaryFilePath: entry.binary_file_path || null,
+        isDirty: true
+      };
     }));
-    
+
     showToast({ kind: "success", title: "Request Restored", description: `${entry.method} ${entry.url}` });
   }
 
@@ -2443,9 +2495,7 @@ function App() {
       const newEnv = await invoke<Environment>("create_environment", {
         id: uuidv4(),
         workspaceId: activeWorkspaceId,
-        workspace_id: activeWorkspaceId,
         collectionId,
-        collection_id: collectionId,
         name,
         variables
       });
@@ -2481,7 +2531,7 @@ function App() {
   async function handleSetActiveEnvironment(id: string | null) {
     if (!activeWorkspaceId) return;
     try {
-      await invoke("set_active_environment", { id, workspaceId: activeWorkspaceId, workspace_id: activeWorkspaceId });
+      await invoke("set_active_environment", { id, workspaceId: activeWorkspaceId });
       setActiveEnvId(id);
       setEnvironments(prev => prev.map(e => ({ ...e, is_active: e.id === id })));
     } catch (err) {
@@ -2502,6 +2552,100 @@ function App() {
     };
     loadGlobals();
   }, []);
+
+  useEffect(() => {
+    const unlistenStatus = listen<any>("ws-status", (event) => {
+      const { connection_id, status, error } = event.payload;
+      setOpenTabs(prev => prev.map(t =>
+        t.requestId === connection_id ? { ...t, wsStatus: status } : t
+      ));
+      if (error) {
+        showToast({ kind: "error", title: "WebSocket Error", description: error });
+      }
+    });
+
+    const unlistenMsg = listen<any>("ws-message", (event) => {
+      const msg = event.payload;
+      setOpenTabs(prev => prev.map(t =>
+        t.requestId === msg.connection_id
+          ? { ...t, wsMessages: [...(t.wsMessages || []), msg] }
+          : t
+      ));
+    });
+
+    return () => {
+      unlistenStatus.then(f => f());
+      unlistenMsg.then(f => f());
+    };
+  }, []);
+
+  const handleWsConnect = async () => {
+    if (!activeTab || !activeTab.url.trim()) return;
+
+    // Resolve Variables
+    const activeEnv = environments.find(e => e.id === activeEnvId);
+    let originalEnvData = {};
+    if (activeEnv) {
+      try { originalEnvData = JSON.parse(activeEnv.variables); } catch (e) { }
+    }
+    const resolutionContext = { ...globals, ...originalEnvData };
+
+    const resolvedUrl = resolveVariables(activeTab.url, resolutionContext);
+    const headersObj = headerRowsToObject(activeTab.headers);
+    const resolvedHeaders: Record<string, string> = {};
+    Object.entries(headersObj).forEach(([k, v]) => {
+      resolvedHeaders[k] = resolveVariables(v, resolutionContext);
+    });
+
+    setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, wsStatus: "connecting" } : t));
+
+    try {
+      await invoke("ws_connect", {
+        connectionId: activeTab.requestId,
+        url: resolvedUrl,
+        headers: resolvedHeaders,
+      });
+    } catch (err) {
+      showToast({ kind: "error", title: "Connection Failed", description: String(err) });
+      setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, wsStatus: "error" } : t));
+    }
+  };
+
+  const handleWsDisconnect = async () => {
+    if (!activeTab) return;
+    try {
+      await invoke("ws_disconnect", { connectionId: activeTab.requestId });
+    } catch (err) {
+      console.error("Disconnect error:", err);
+    }
+  };
+
+  const handleWsSend = async (content: string) => {
+    if (!activeTab) return;
+    try {
+      await invoke("ws_send", {
+        connectionId: activeTab.requestId,
+        content,
+      });
+      // Add message to local log immediately
+      const sentMsg = {
+        id: uuidv4(),
+        connection_id: activeTab.requestId,
+        content,
+        is_sent: true,
+        timestamp: new Date().toISOString(),
+      };
+      setOpenTabs(prev => prev.map(t =>
+        t.id === activeTabId ? { ...t, wsMessages: [...(t.wsMessages || []), sentMsg] } : t
+      ));
+    } catch (err) {
+      showToast({ kind: "error", title: "Send Failed", description: String(err) });
+    }
+  };
+
+  const handleClearWsMessages = () => {
+    setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, wsMessages: [] } : t));
+  };
 
   const peersCount = Object.keys(peers).length;
 
@@ -2527,7 +2671,9 @@ function App() {
 
       <div className="flex-1 flex overflow-hidden">
         {isSidebarVisible && (
-          <CollectionsSidebar
+          <>
+            <div style={{ width: `${sidebarWidth}px` }} className="flex shrink-0">
+              <CollectionsSidebar
             collections={collections}
             foldersByCollection={foldersByCollection}
             activeCollectionId={activeCollectionId}
@@ -2636,8 +2782,16 @@ function App() {
             onRunCollection={handleRunCollection}
             onRunFolder={handleRunFolder}
             isLoadingRequests={isLoadingRequests}
-            peersCount={peersCount}
-          />
+              peersCount={peersCount}
+            />
+          </div>
+            <div
+              className={`w-1.5 h-full bg-border/10 cursor-col-resize hover:bg-primary/30 transition-colors shrink-0 z-20 relative group ${isResizingSidebar ? 'bg-primary/40' : ''}`}
+              onMouseDown={handleSidebarResizeStart}
+            >
+              <div className={`absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 bg-border/50 group-hover:bg-primary/60 transition-colors ${isResizingSidebar ? 'bg-primary' : ''}`} />
+            </div>
+          </>
         )}
 
         <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#1e1e1e]">
@@ -2650,62 +2804,120 @@ function App() {
               onNewTab={handleNewTab}
             />
           )}
-          
-          <RequestWorkspace
-            activeCollectionName={activeCollection?.name || ""}
-            activeRequestName={activeTab?.name || ""}
-            isDirty={isDirty}
-            isSavingRequest={isSavingRequest}
-            onCreateRequest={() => void handleCreateRequestClick()}
-            onSaveRequest={() => {
-              void handleSaveRequest();
-            }}
-            // Map tab state to RequestWorkspace props
-            reqMethod={activeTab?.method || "GET"}
-            setReqMethod={(m) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, method: typeof m === 'function' ? m(t.method) : m } : t))}
-            reqUrl={activeTab?.url || ""}
-            setReqUrl={(u) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, url: typeof u === 'function' ? u(t.url) : u } : t))}
-            reqBody={activeTab?.body || ""}
-            setReqBody={(b) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, body: typeof b === 'function' ? b(t.body || "") : b } : t))}
-            reqParams={activeTab?.params || []}
-            setReqParams={(p) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, params: typeof p === 'function' ? p(t.params) : p } : t))}
-            reqHeaders={activeTab?.headers || []}
-            setReqHeaders={(h) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, headers: typeof h === 'function' ? h(t.headers) : h } : t))}
-            reqPreRequestScript={activeTab?.preRequestScript || null}
-            setReqPreRequestScript={(s) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, preRequestScript: typeof s === 'function' ? (s as any)(t.preRequestScript) : s } : t))}
-            reqPostRequestScript={activeTab?.postRequestScript || null}
-            setReqPostRequestScript={(s) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, postRequestScript: typeof s === 'function' ? (s as any)(t.postRequestScript) : s } : t))}
-            reqBodyType={activeTab?.bodyType || "raw"}
-            setReqBodyType={(val) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, bodyType: typeof val === 'function' ? (val as any)(t.bodyType) : val } : t))}
-            reqFormData={activeTab?.formData || []}
-            setReqFormData={(val) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, formData: typeof val === 'function' ? (val as any)(t.formData) : val } : t))}
-            reqBinaryFilePath={activeTab?.binaryFilePath || null}
-            setReqBinaryFilePath={(val) => setOpenTabs(tabs => tabs.map(t => t.id === activeTabId ? { ...t, binaryFilePath: typeof val === 'function' ? (val as any)(t.binaryFilePath) : val } : t))}
-            activeWorkspaceTab={activeWorkspaceTab}
-            setActiveWorkspaceTab={setActiveWorkspaceTab}
-            isSending={isSending}
-            onSendRequest={() => {
-              void handleSendRequest();
-            }}
-            environments={environments}
-            activeEnvId={activeEnvId}
-          />
 
-          <div
-            className={`h-1.5 w-full bg-border/20 cursor-ns-resize hover:bg-primary/40 transition-colors shrink-0 z-10 flex items-center justify-center relative group ${isResizing ? 'bg-primary/50' : ''}`}
-            onMouseDown={handleResizeStart}
-          >
-            <div className={`w-8 h-0.5 rounded-full bg-border group-hover:bg-primary/60 transition-colors ${isResizing ? 'bg-primary' : ''}`} />
-          </div>
+          {activeTab ? (
+            activeTab.method === "WS" ? (
+              <WebSocketWorkspace
+                url={activeTab.url}
+                onUrlChange={(url) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, url, isDirty: true } : t))}
+                headers={activeTab.headers}
+                setHeaders={(headers) => setOpenTabs(prev => {
+                  const next = [...prev];
+                  const idx = next.findIndex(t => t.id === activeTabId);
+                  if (idx !== -1) {
+                    next[idx] = {
+                      ...next[idx],
+                      headers: typeof headers === "function" ? headers(next[idx].headers) : headers,
+                      isDirty: true
+                    };
+                  }
+                  return next;
+                })}
+                environments={environments}
+                activeEnvId={activeEnvId}
+                status={activeTab.wsStatus || "disconnected"}
+                messages={activeTab.wsMessages || []}
+                onConnect={handleWsConnect}
+                onDisconnect={handleWsDisconnect}
+                onSendMessage={handleWsSend}
+                onClearMessages={handleClearWsMessages}
+              />
+            ) : (
+              <div className="flex-1 flex flex-col min-h-0 min-w-0">
+                <RequestWorkspace
+                  activeCollectionName={activeCollection?.name || "No collection"}
+                  activeRequestName={activeTab.name}
+                  isDirty={activeTab.isDirty || false}
+                  isSavingRequest={isSavingRequest}
+                  onCreateRequest={handleCreateRequestClick}
+                  onSaveRequest={handleSaveRequest}
+                  reqMethod={activeTab.method}
+                  setReqMethod={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, method: typeof val === 'function' ? val(t.method) : val, isDirty: true } : t))}
+                  reqUrl={activeTab.url}
+                  setReqUrl={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, url: typeof val === 'function' ? val(t.url) : val, isDirty: true } : t))}
+                  reqBody={activeTab.body || ""}
+                  setReqBody={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, body: typeof val === 'function' ? val(t.body || "") : val, isDirty: true } : t))}
+                  reqParams={activeTab.params}
+                  setReqParams={(params: any) => setOpenTabs(prev => {
+                    const next = [...prev];
+                    const idx = next.findIndex(t => t.id === activeTabId);
+                    if (idx !== -1) {
+                      next[idx] = {
+                        ...next[idx],
+                        params: typeof params === 'function' ? params(next[idx].params) : params,
+                        isDirty: true
+                      };
+                    }
+                    return next;
+                  })}
+                  reqHeaders={activeTab.headers}
+                  setReqHeaders={(headers: any) => setOpenTabs(prev => {
+                    const next = [...prev];
+                    const idx = next.findIndex(t => t.id === activeTabId);
+                    if (idx !== -1) {
+                      next[idx] = {
+                        ...next[idx],
+                        headers: typeof headers === 'function' ? headers(next[idx].headers) : headers,
+                        isDirty: true
+                      };
+                    }
+                    return next;
+                  })}
+                  activeWorkspaceTab={activeWorkspaceTab}
+                  setActiveWorkspaceTab={setActiveWorkspaceTab}
+                  onSendRequest={handleSendRequest}
+                  isSending={isSending}
+                  environments={environments}
+                  activeEnvId={activeEnvId}
+                  reqPreRequestScript={activeTab.preRequestScript}
+                  setReqPreRequestScript={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, preRequestScript: typeof val === 'function' ? val(t.preRequestScript) : val, isDirty: true } : t))}
+                  reqPostRequestScript={activeTab.postRequestScript}
+                  setReqPostRequestScript={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, postRequestScript: typeof val === 'function' ? val(t.postRequestScript) : val, isDirty: true } : t))}
+                  reqBodyType={activeTab.bodyType}
+                  setReqBodyType={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, bodyType: typeof val === 'function' ? val(t.bodyType) : val, isDirty: true } : t))}
+                  reqFormData={activeTab.formData}
+                  setReqFormData={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, formData: typeof val === 'function' ? val(t.formData) : val, isDirty: true } : t))}
+                  reqBinaryFilePath={activeTab.binaryFilePath}
+                  setReqBinaryFilePath={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, binaryFilePath: typeof val === 'function' ? val(t.binaryFilePath) : val, isDirty: true } : t))}
+                />
 
-          <ResponsePanel
-            reqResponse={activeTab?.lastResponse || null}
-            isSending={isSending}
-            respTab={activeTab?.lastRespTab || "Body"}
-            setRespTab={(tab) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, lastRespTab: typeof tab === 'function' ? (tab as any)(t.lastRespTab || "Body") : tab } : t))}
-            height={responseHeight}
-            onOpenCode={() => setIsCodeSnippetOpen(true)}
-          />
+                <div
+                  className={`h-1.5 w-full bg-border/20 cursor-ns-resize hover:bg-primary/40 transition-colors shrink-0 z-10 flex items-center justify-center relative group ${isResizing ? 'bg-primary/50' : ''}`}
+                  onMouseDown={handleResizeStart}
+                >
+                  <div className={`w-8 h-0.5 rounded-full bg-border group-hover:bg-primary/60 transition-colors ${isResizing ? 'bg-primary' : ''}`} />
+                </div>
+
+                {activeTab.lastResponse && (
+                  <ResponsePanel
+                    reqResponse={activeTab.lastResponse}
+                    isSending={isSending}
+                    respTab={activeTab.lastRespTab || "Body"}
+                    setRespTab={(tab) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, lastRespTab: typeof tab === 'function' ? (tab as any)(t.lastRespTab || "Body") : (tab as any) } : t))}
+                    height={responseHeight}
+                    onOpenCode={() => setIsCodeSnippetOpen(true)}
+                  />
+                )}
+              </div>
+            )
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center text-muted space-y-4 select-none opacity-50 italic">
+              <div className="p-8 rounded-full bg-surface/30 border border-border border-dashed">
+                <Play size={48} className="translate-x-1" />
+              </div>
+              <p className="text-[14px] font-medium tracking-wide">Select a request or create a new one to get started</p>
+            </div>
+          )}
         </div>
 
         {isInspectorVisible && (
@@ -2721,7 +2933,6 @@ function App() {
           />
         )}
       </div>
-      <ToastViewport toasts={toasts} onDismiss={dismissToast} />
 
       {dialogState.isOpen && dialogState.type === "prompt" && (
         <PromptDialog

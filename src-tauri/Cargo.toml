@@ -1,5 +1,6 @@
 [package]
-name = "devcollab"
+name = "localman"
+default-run = "localman"
 version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]
@@ -11,8 +12,16 @@ edition = "2021"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "devcollab_lib"
+name = "localman_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "localman"
+path = "src/main.rs"
+
+[[bin]]
+name = "cli_runner"
+path = "src/bin/cli_runner.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -35,4 +44,7 @@ chrono = "0.4.44"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 base64 = "0.22.1"
+tokio-tungstenite = { version = "0.26.1", features = ["rustls-tls-webpki-roots"] }
+http = "1"
+clap = { version = "4.5.30", features = ["derive"] }
 

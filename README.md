@@ -1,86 +1,88 @@
 # Localman 🚀
 
-Localman is a powerful, lightweight, and modern API development platform built with **Rust**, **Tauri**, and **React**. Designed for speed and developer experience, it provides a comprehensive suite of tools for designing, testing, and debugging HTTP requests.
+Localman is a high-performance, lightweight API development platform built with **Rust**, **Tauri**, and **React**. It orients around speed, security, and a premium developer experience, providing a full suite of tools for designing, testing, and debugging HTTP and WebSocket connections.
 
 ![Localman Official Logo](file:///C:/Users/subha/.gemini/antigravity/brain/1f13863f-f995-4e95-a515-45b51bc92f1e/localman_logo_final_orange_1773579611927.png)
 
 ## ✨ Key Features
 
 ### 📡 Advanced Networking
-- **Multi-protocol Support**: Native support for HTTP/HTTPS (gRPC, GraphQL, and WebSockets coming soon).
-- **Complex Body Types**: Easily handle `raw` (JSON, Text), `form-data` (multipart), and `binary` file uploads.
-- **Persistent History**: Automatically save and browse your request history with local timezone support.
+- **Multi-protocol Support**: Native support for **HTTP/HTTPS** and real-time **WebSockets**.
+- **Complex Body Types**: Handle `raw` (JSON, XML, Text), `form-data` (multipart), and `binary` file uploads with ease.
+- **WebSocket Workspace**: Dedicated interface for real-time message logging, connection management, and binary/text frames.
+- **Persistent History**: Automatically indexed request history with local timezone support and recovery.
 
 ### 📜 Professional Scripting Engine
-- **Pre-request & Test Scripts**: Write JavaScript to automate your workflows.
-- **Powerful Sandbox**: Advanced `pm.*` API for environment management, global variables, and automated assertions.
-- **Snippet Library**: Built-in library of reusable code snippets to accelerate your testing.
-- **Dynamic Variables**: Native support for `{{$guid}}`, `{{$timestamp}}`, `{{$isoTimestamp}}`, and `{{$randomInt}}`.
+- **Pre-request & Test Scripts**: Automate workflows using a sandboxed JavaScript environment.
+- **Environment Management**: Effortlessly switch between local, staging, and production environments.
+- **Global Variables**: Share data across your entire workspace.
+- **Assertions**: Powerful `pm.*` API for automated status, header, and body validation.
+- **Dynamic Variables**: Built-in support for `{{$guid}}`, `{{$timestamp}}`, and `{{$randomInt}}`.
 
-### 🏃 Collection Runner
-- **Batch Execution**: Run entire collections or folders sequentially.
-- **Advanced Controls**: Customizable iterations, delays, and real-time status monitoring.
-- **Reporting**: Aggregate reports with pass/fail metrics and detailed response audits.
-- **Flow Control**: Pause, stop, or resume runs at any time.
+### 🏃 Collection Runner & CLI
+- **Batch Execution**: Run entire collections or folders sequentially with customizable iterations and delays.
+- **Real-time Monitoring**: Track progress, pass/fail rates, and average response times.
+- **CLI Runner**: A dedicated high-performance Rust CLI (`cli_runner`) for executing collections directly from the terminal.
 
 ### 🎨 Modern UX/UI
-- **Optimized for Developers**: Sleek Dark Mode with a layout focused on productivity.
-- **Visual Previews**: Pretty-printing for JSON, HTML, and XML, plus a sandboxed preview mode for HTML and images.
-- **Global Search**: Find patterns instantly within any response body.
-- **Tab Isolation**: Each request tab independently remembers its state, response, and view settings.
+- **Optimized for Productivity**: Sleek, glassmorphic Dark Mode designed to reduce eye strain.
+- **Visual Previews**: Pretty-printing for JSON/HTML and a sandboxed preview for images and web content.
+- **Tab System**: Advanced tab management that remembers scroll positions, response data, and view settings per request.
+- **Search & Filter**: Instant pattern matching within response bodies and collection hierarchies.
 
 ## 🛠️ Tech Stack
 
-- **Backend**: [Rust](https://www.rust-lang.org/) & [Tauri](https://tauri.app/) for high-performance network logic and secure desktop integration.
-- **Frontend**: [React](https://reactjs.org/), [TypeScript](https://www.typescriptlang.org/), and [TailwindCSS](https://tailwindcss.com/).
-- **Icons**: [Lucide React](https://lucide.dev/).
-- **Bundler**: [Vite](https://vitejs.dev/).
+- **Core**: [Rust](https://www.rust-lang.org/) (Networking & Security) + [Tauri](https://tauri.app/) (Desktop Bridge)
+- **Frontend**: [React](https://reactjs.org/), [TypeScript](https://www.typescriptlang.org/), [Vite](https://vitejs.dev/)
+- **Styling**: Vanilla CSS & [TailwindCSS](https://tailwindcss.com/)
+- **Data**: [SQLite](https://www.sqlite.org/) (bundled via `rusqlite`)
 
 ## 🚀 Getting Started
 
 ### Prerequisites
+- [Rust](https://www.rust-lang.org/tools/install) (2021 edition)
+- [Node.js](https://nodejs.org/) (v18+)
+- [pnpm](https://pnpm.io/)
 
-- [Rust](https://www.rust-lang.org/tools/install)
-- [Node.js](https://nodejs.org/) (v16+)
-- [pnpm](https://pnpm.io/) (recommended)
+### Installation & Development
 
-### Installation (Development)
-
-1. **Clone the repository**:
+1. **Clone & Install**:
    ```bash
-   git clone https://github.com/your-username/devcollab.git
-   cd devcollab
-   ```
-
-2. **Install dependencies**:
-   ```bash
+   git clone https://github.com/your-username/localman.git
+   cd localman
    pnpm install
    ```
 
-3. **Run in development mode**:
+2. **Run Desktop App**:
    ```bash
    pnpm tauri dev
    ```
 
-4. **Build for production**:
+3. **Run CLI Runner**:
+   ```bash
+   cd src-tauri
+   cargo run --bin cli_runner -- --help
+   ```
+
+4. **Build Production Apps**:
    ```bash
    pnpm tauri build
    ```
 
-## 📚 Scripting API (Brief)
+## 📚 Scripting API
 
-Localman provides a `pm` object in both Pre-request and Test scripts:
+Localman exposes the `pm` object in scripts:
 
-- `pm.environment.set(key, value)` / `pm.environment.get(key)`
-- `pm.globals.set(key, value)` / `pm.globals.get(key)`
-- `pm.test(name, callback)`: Define an automated test.
-- `pm.expect(value).to.equal(val)`: Assertions (supports `equal`, `include`, `be.ok`, etc.).
-- `pm.response`: Access response `code`, `body`, and `headers`.
+```javascript
+// Example Test Script
+pm.test("Status is 200", () => {
+    pm.expect(pm.response.code).to.equal(200);
+});
 
-## 🤝 Contributing
+pm.environment.set("token", pm.response.json().access_token);
+```
 
-We welcome contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+## 🤝 Contributing & License
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+We welcome contributions! Please refer to [CONTRIBUTING.md](CONTRIBUTING.md).
+Licensed under the [MIT License](LICENSE).

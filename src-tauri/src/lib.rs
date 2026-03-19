@@ -1,7 +1,8 @@
 mod db;
-mod http;
+pub mod http;
 mod network;
 mod sync;
+mod ws_client;
 use tauri::Manager;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -22,14 +23,14 @@ pub async fn run() {
             // 1. Initialize DB and create tables
             let conn = db::init_db(app.handle()).expect("Failed to initialize database");
 
-            // 2. Set up db connection for Tauri state
             app.manage(db::AppState {
                 db: std::sync::Mutex::new(Some(conn)),
             });
+            app.manage(ws_client::WsState::new());
 
             // Start mDNS network discovery
             let app_handle = app.handle().clone();
-            let network_state = network::start_mdns(app_handle, "devcollab_host".to_string(), 8080)
+            let network_state = network::start_mdns(app_handle, "localman_host".to_string(), 8080)
                 .expect("Failed to start mDNS daemon");
             app.manage(network_state);
 
@@ -70,6 +71,9 @@ pub async fn run() {
             db::clear_history,
             db::get_globals,
             db::update_globals,
+            ws_client::ws_connect,
+            ws_client::ws_send,
+            ws_client::ws_disconnect,
             http::execute_request,
             network::get_known_peers
         ])
