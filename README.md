@@ -2,6 +2,14 @@
 
 Localman is a high-performance, lightweight API development platform built with **Rust**, **Tauri**, and **React**. It orients around speed, security, and a premium developer experience, providing a full suite of tools for designing, testing, and debugging HTTP and WebSocket connections.
 
+## 💾 Download
+
+**Latest Version:** [v0.1.0-alpha](https://github.com/Grafynut/localman/releases/latest)
+
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/Grafynut/localman?color=orange&label=latest%20release)](https://github.com/Grafynut/localman/releases/latest)
+
+Download the latest **.msi** installer or **standalone .exe** from our [Releases Page](https://github.com/Grafynut/localman/releases).
+
 ![Localman Official Logo](./public/logo.png)
 
 ## ✨ Key Features
