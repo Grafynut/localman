@@ -275,6 +275,33 @@ pub fn get_known_peers(state: tauri::State<'_, NetworkState>) -> HashMap<String,
         .collect()
 }
 
+#[tauri::command]
+pub fn add_manual_peer(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, NetworkState>,
+    ip: String,
+) -> Result<(), String> {
+    let mut peers = state.known_peers.lock().unwrap();
+    let name = format!("Manual-{}", ip.replace('.', "-"));
+    peers.insert(
+        name.clone(),
+        KnownPeer {
+            ip_address: ip.clone(),
+            last_seen_unix: now_unix_secs() + 3600 * 24, // Keep for 24 hours as priority
+        },
+    );
+
+    // Broadcast updated list to frontend
+    let current_peers: std::collections::HashMap<String, String> = peers
+        .iter()
+        .map(|(n, p)| (n.clone(), p.ip_address.clone()))
+        .collect();
+    let _ = app.emit("peers_updated", current_peers);
+
+    println!("Manually added peer: {} at {}", name, ip);
+    Ok(())
+}
+
 fn now_unix_secs() -> u64 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs(),

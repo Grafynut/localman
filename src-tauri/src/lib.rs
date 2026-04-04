@@ -84,7 +84,8 @@ pub async fn run() {
             http::execute_request,
             network::get_known_peers,
             network::get_local_identity,
-            network::send_sync_event
+            network::send_sync_event,
+            network::add_manual_peer
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

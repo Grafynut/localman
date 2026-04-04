@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import logo from "../assets/logo.png";
+import { invoke } from "@tauri-apps/api/core";
 import { Activity, ChevronDown, Plus, Search, Settings, User, Users, Keyboard, PanelLeft, PanelRight, Globe, Monitor } from "lucide-react";
 import type { Workspace, Environment } from "../types";
 import { EnvironmentSelector } from "./EnvironmentSelector";
@@ -46,8 +47,19 @@ export function TopBar({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isPeersOpen, setIsPeersOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [manualIp, setManualIp] = useState("");
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const peersRef = useRef<HTMLDivElement | null>(null);
+
+  const handleManualAdd = async () => {
+    if (!manualIp.trim()) return;
+    try {
+      await invoke("add_manual_peer", { ip: manualIp.trim() });
+      setManualIp("");
+    } catch (error) {
+      console.error("Failed to add manual peer:", error);
+    }
+  };
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -257,6 +269,23 @@ export function TopBar({
                 <p className="text-[9px] text-muted text-center leading-relaxed">
                   Devices running Localman on your network will appear here automatically.
                 </p>
+                <div className="mt-3 flex items-center space-x-2">
+                  <input
+                    type="text"
+                    value={manualIp}
+                    onChange={(e) => setManualIp(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleManualAdd()}
+                    placeholder="Add by IP (e.g. 192.168.1.10)"
+                    className="flex-1 bg-background border border-border rounded px-2 py-1 text-[10px] text-gray-200 placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-colors"
+                  />
+                  <button
+                    onClick={handleManualAdd}
+                    className="p-1 hover:bg-primary/20 text-primary rounded transition-colors"
+                    title="Add Peer"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
               </div>
             </div>
           )}
