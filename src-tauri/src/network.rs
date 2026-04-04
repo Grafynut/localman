@@ -7,7 +7,7 @@ use tauri::AppHandle;
 use tauri::Emitter;
 
 const SERVICE_TYPE: &str = "_localman._tcp.local.";
-const STALE_PEER_SECONDS: u64 = 60;
+const STALE_PEER_SECONDS: u64 = 35;
 
 #[derive(Clone)]
 pub struct KnownPeer {
@@ -344,12 +344,12 @@ pub async fn send_sync_event(peer_ip: String, event: SyncEvent) -> Result<(), St
     let url = format!("ws://{}:8080/ws", host);
     println!("Rust: Connecting to {} to send sync event", url);
     
-    let (mut ws_stream, _) = connect_async(url).await.map_err(|e| e.to_string())?;
+    let (mut ws_stream, _) = connect_async(url).await.map_err(|e| format!("Failed to connect to {}: {}", host, e))?;
     
-    let payload = serde_json::to_string(&event).map_err(|e| e.to_string())?;
+    let payload = serde_json::to_string(&event).map_err(|e| format!("Serialization error: {}", e))?;
     ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(payload.into()))
         .await
-        .map_err(|e: tokio_tungstenite::tungstenite::Error| e.to_string())?;
+        .map_err(|e: tokio_tungstenite::tungstenite::Error| format!("Failed to send payload to {}: {}", host, e))?;
     
     let _ = ws_stream.close(None).await;
     Ok(())

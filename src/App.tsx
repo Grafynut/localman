@@ -71,6 +71,7 @@ function App() {
   const [isLoadingRequests, setIsLoadingRequests] = useState(false);
   const [isSavingRequest, setIsSavingRequest] = useState(false);
 
+
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("Headers");
 
   const [environments, setEnvironments] = useState<Environment[]>([]);
@@ -332,6 +333,41 @@ function App() {
       );
     }
   }, [isDirty, activeTabId]);
+
+  // --- LIVE SYNC DEBOUNCE ---
+  useEffect(() => {
+    if (!activeTab || !activeTab.requestId || !activeTab.isDirty) return;
+
+    const handler = setTimeout(() => {
+      // Create a payload similar to what save would send, but only for sync
+      const syncPayload = {
+        id: activeTab.requestId,
+        name: activeTab.name,
+        method: activeTab.method,
+        url: activeTab.url,
+        headers: JSON.stringify(headerRowsToObject(activeTab.headers)),
+        body: activeTab.body,
+        body_type: activeTab.bodyType,
+        form_data: JSON.stringify(activeTab.formData),
+        binary_file_path: activeTab.binaryFilePath,
+        collection_id: activeCollectionId,
+      };
+
+      void broadcastSyncEvent("Update", "Request", activeTab.requestId, syncPayload, true);
+    }, 1000); // 1s debounce to avoid flooding network
+
+    return () => clearTimeout(handler);
+  }, [
+    activeTab?.requestId,
+    activeTab?.url,
+    activeTab?.method,
+    activeTab?.body,
+    activeTab?.headers,
+    activeTab?.bodyType,
+    activeTab?.formData,
+    activeTab?.binaryFilePath,
+    activeTab?.isDirty
+  ]);
 
   // Resize handlers
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -1028,6 +1064,7 @@ function App() {
     entityType: SyncEntityType,
     entityId: string,
     payload: unknown,
+    silent = false
   ) {
     const peerIps = connectedPeerList();
     if (peerIps.length === 0) {
@@ -1039,11 +1076,11 @@ function App() {
       peerIps.map((peerIp) => sendSyncEventsToPeer(peerIp, [event])),
     );
     const failed = results.filter((result) => result.status === "rejected").length;
-    if (failed > 0) {
+    if (failed > 0 && !silent) {
       showToast({
-        kind: "error",
-        title: "Sync partially failed",
-        description: `${failed} peer${failed === 1 ? "" : "s"} unreachable.`,
+        kind: "info",
+        title: "Peer status update",
+        description: `${failed} peer${failed === 1 ? "" : "s"} currenty unreachable.`,
       });
     }
   }
@@ -1310,10 +1347,27 @@ function App() {
         nextCollectionRequests[idx] = upserted;
         return { ...prev, [upserted.collection_id]: nextCollectionRequests };
       });
-      if (activeTab?.requestId === upserted.id) {
-        // Update the tab state if it was modified externally? This is tricky with ephemeral edits.
-        // For now, let's just update the cached request and let the user's edits take precedence
-      }
+
+      // SYNC TO TABS: Update UI if this request is open
+      setOpenTabs(prev => prev.map(tab => {
+        if (tab.requestId !== upserted.id) return tab;
+        // If the user hasn't modified the tab locally (isDirty === false), 
+        // we can safely update it with the remote change.
+        if (!tab.isDirty) {
+          return {
+            ...tab,
+            name: upserted.name,
+            method: upserted.method,
+            url: upserted.url,
+            body: upserted.body || "",
+            headers: parseHeadersToRows(upserted.headers),
+            bodyType: (upserted.body_type as any) || "raw",
+            formData: parseFormDataToRows(upserted.form_data),
+            binaryFilePath: upserted.binary_file_path || null,
+          };
+        }
+        return tab;
+      }));
     }
   }
 
@@ -1578,7 +1632,7 @@ function App() {
   const broadcastCollectionsMetadata = useCallback(async () => {
     if (Object.keys(peers).length === 0) return;
     const metadata = collections.map(c => ({ id: c.id, name: c.name, owner_id: c.owner_id }));
-    void broadcastSyncEvent("Metadata" as any, "PeerMetadata" as any, localDeviceId, metadata);
+    void broadcastSyncEvent("Metadata" as any, "PeerMetadata" as any, localDeviceId, metadata, true);
   }, [collections, peers, localDeviceId]);
 
   useEffect(() => {
