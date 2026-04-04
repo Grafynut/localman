@@ -302,6 +302,26 @@ pub fn add_manual_peer(
     Ok(())
 }
 
+#[tauri::command]
+pub fn remove_peer(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, NetworkState>,
+    name: String,
+) -> Result<(), String> {
+    let mut peers = state.known_peers.lock().unwrap();
+    peers.remove(&name);
+
+    // Broadcast updated list to frontend
+    let current_peers: std::collections::HashMap<String, String> = peers
+        .iter()
+        .map(|(n, p)| (n.clone(), p.ip_address.clone()))
+        .collect();
+    let _ = app.emit("peers_updated", current_peers);
+
+    println!("Manually removed peer: {}", name);
+    Ok(())
+}
+
 fn now_unix_secs() -> u64 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs(),

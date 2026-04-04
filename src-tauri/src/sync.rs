@@ -5,12 +5,18 @@ pub enum SyncAction {
     Create,
     Update,
     Delete,
+    Metadata,
+    RequestAccess,
+    GrantAccess,
+    DenyAccess,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum EntityType {
     Collection,
+    Folder,
     Request,
+    PeerMetadata,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

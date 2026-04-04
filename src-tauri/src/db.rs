@@ -733,6 +733,32 @@ pub fn rename_folder(
 }
 
 #[tauri::command]
+pub fn upsert_folder(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    collection_id: String,
+    name: String,
+    position: i32,
+) -> std::result::Result<Folder, String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        conn.execute(
+            "INSERT INTO folders (id, collection_id, name, position)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(id) DO UPDATE SET
+               collection_id = excluded.collection_id,
+               name = excluded.name,
+               position = excluded.position",
+            (&id, &collection_id, &name, &position),
+        )
+        .map_err(|e| e.to_string())?;
+        fetch_folder_by_id(conn, &id)
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
 pub fn delete_folder(
     state: tauri::State<'_, AppState>,
     id: String,

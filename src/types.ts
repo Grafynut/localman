@@ -120,8 +120,8 @@ export type WsStatus = {
   error?: string;
 };
 
-export type SyncAction = "Create" | "Update" | "Delete";
-export type SyncEntityType = "Collection" | "Folder" | "Request";
+export type SyncAction = "Create" | "Update" | "Delete" | "Metadata" | "RequestAccess" | "GrantAccess" | "DenyAccess";
+export type SyncEntityType = "Collection" | "Folder" | "Request" | "PeerMetadata";
 
 export type SyncEvent = {
   event_id: string;

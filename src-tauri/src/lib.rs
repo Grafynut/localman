@@ -50,6 +50,7 @@ pub async fn run() {
             db::create_workspace,
             db::create_folder,
             db::rename_folder,
+            db::upsert_folder,
             db::delete_folder,
             db::duplicate_folder,
             db::get_folders,
@@ -85,7 +86,8 @@ pub async fn run() {
             network::get_known_peers,
             network::get_local_identity,
             network::send_sync_event,
-            network::add_manual_peer
+            network::add_manual_peer,
+            network::remove_peer
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

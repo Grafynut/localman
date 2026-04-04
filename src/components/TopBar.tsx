@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect } from "react";
 import logo from "../assets/logo.png";
 import { invoke } from "@tauri-apps/api/core";
-import { Activity, ChevronDown, Plus, Search, Settings, User, Users, Keyboard, PanelLeft, PanelRight, Globe, Monitor } from "lucide-react";
+import { Activity, ChevronDown, Plus, Search, Settings, User, Users, Keyboard, PanelLeft, PanelRight, Globe, Monitor, Trash2 } from "lucide-react";
 import type { Workspace, Environment } from "../types";
 import { EnvironmentSelector } from "./EnvironmentSelector";
 
@@ -58,6 +58,14 @@ export function TopBar({
       setManualIp("");
     } catch (error) {
       console.error("Failed to add manual peer:", error);
+    }
+  };
+
+  const handleRemovePeer = async (name: string) => {
+    try {
+      await invoke("remove_peer", { name });
+    } catch (err) {
+      console.error("Failed to remove peer:", err);
     }
   };
 
@@ -247,15 +255,25 @@ export function TopBar({
 
                 {peersCount > 0 ? (
                   Object.entries(peers).map(([name, ip]) => (
-                    <div key={name} className="px-3 py-2 hover:bg-white/5 transition-colors">
+                    <div key={name} className="px-3 py-2 hover:bg-white/5 transition-colors group/peer">
                       <div className="flex items-center space-x-3">
                         <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center border border-primary/20">
                           <Monitor size={12} className="text-primary" />
                         </div>
-                        <div className="flex flex-col min-w-0">
+                        <div className="flex flex-col min-w-0 flex-1">
                           <span className="text-[11px] font-bold text-gray-200 truncate">{name.split(".")[0]}</span>
                           <span className="text-[9px] font-mono text-muted">{ip}</span>
                         </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemovePeer(name);
+                          }}
+                          className="opacity-0 group-hover/peer:opacity-100 p-1 text-muted hover:text-red-400 transition-all active:scale-95"
+                          title="Remove Collaborator"
+                        >
+                          <Trash2 size={12} />
+                        </button>
                       </div>
                     </div>
                   ))

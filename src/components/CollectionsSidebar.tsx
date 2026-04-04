@@ -1,4 +1,4 @@
-import { ChevronRight, Folder as FolderIcon, MoreHorizontal, Plus, GripVertical, Upload, History as HistoryIcon, Play } from "lucide-react";
+import { ChevronRight, Folder as FolderIcon, MoreHorizontal, Plus, GripVertical, Upload, History as HistoryIcon, Play, Share2 } from "lucide-react";
 import { useMemo, useState, useCallback } from "react";
 import {
   DndContext,
@@ -58,7 +58,10 @@ type Props = {
   onHistory: () => void;
   onRunCollection: (collection: Collection) => void;
   onRunFolder: (folder: Folder) => void;
+  onShareCollection: (collectionId: string) => void;
   peersCount: number;
+  peerCollections: Record<string, Array<{id: string, name: string, owner_id: string}>>;
+  onDownloadRequest: (peerIpId: string, collectionId: string) => void;
   onHide?: () => void;
 };
 
@@ -72,6 +75,8 @@ interface CollectionHeaderProps {
   onRename: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onShare: () => void;
+  peersCount: number;
   setMenuId: (id: string | null) => void;
   isOpen: boolean;
 }
@@ -86,6 +91,8 @@ function CollectionHeader({
   onRename,
   onDuplicate,
   onDelete,
+  onShare,
+  peersCount,
   setMenuId,
   isOpen,
 }: CollectionHeaderProps) {
@@ -151,6 +158,15 @@ function CollectionHeader({
             >
               Duplicate
             </button>
+            {peersCount > 0 && (
+              <button
+                onClick={() => { setMenuId(null); onShare(); }}
+                className="w-full px-3 py-1.5 text-left text-[11px] hover:bg-white/5 flex items-center space-x-2 text-primary"
+              >
+                <Share2 size={10} />
+                <span>Share with Peers</span>
+              </button>
+            )}
             <div className="h-px bg-border my-1" />
             <button
               onClick={() => { setMenuId(null); onDelete(); }}
@@ -512,8 +528,6 @@ export function CollectionsSidebar({
   onRenameFolder,
   onDuplicateFolder,
   onDeleteFolder,
-  onRunCollection,
-  onRunFolder,
   onMoveFolder,
   onMoveRequest,
   onCopyRequest,
@@ -521,12 +535,17 @@ export function CollectionsSidebar({
   onRenameRequest,
   onDuplicateRequest,
   onDeleteRequest,
-  isLoadingRequests,
   activeRequestIsDirty,
+  isLoadingRequests,
   onExportWorkspace,
   onImportWorkspace,
   onHistory,
+  onRunCollection,
+  onRunFolder,
+  onShareCollection,
   peersCount,
+  peerCollections,
+  onDownloadRequest,
   onHide,
 }: Props) {
   const [openCollectionMenuId, setOpenCollectionMenuId] = useState<string | null>(null);
@@ -614,16 +633,13 @@ export function CollectionsSidebar({
         break;
       }
 
-      // Is it the collection itself?
       if (col.id === overId) {
         targetCollectionId = col.id;
         targetFolderId = null;
         if (activeData?.type === 'request') {
-          // Moving request to collection root
           const rootReqs = reqs.filter(r => !r.folder_id);
           targetPosition = rootReqs.length;
         } else if (activeData?.type === 'folder') {
-          // Moving folder to end of collection
           targetPosition = folders.length;
         }
         break;
@@ -765,6 +781,8 @@ export function CollectionsSidebar({
                         onRename={() => onRenameCollection(collection)}
                         onDuplicate={() => onDuplicateCollection(collection)}
                         onDelete={() => onDeleteCollection(collection)}
+                        onShare={() => onShareCollection(collection.id)}
+                        peersCount={peersCount}
                         setMenuId={setOpenCollectionMenuId}
                         isOpen={openCollectionMenuId === collection.id}
                       />
@@ -869,6 +887,53 @@ export function CollectionsSidebar({
             </div>
           </div>
         </div>
+        {/* Remote Collections Discovery */}
+        {Object.entries(peerCollections).length > 0 && (
+          <div className="mt-8 pt-4 border-t border-white/5 bg-black/10">
+            <div className="px-4 mb-4 flex items-center justify-between">
+              <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-widest">
+                Available on Network
+              </h3>
+              <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-[10px] text-blue-400">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                Live
+              </div>
+            </div>
+            
+            <div className="space-y-1 px-2 pb-8 text-left">
+              {Object.entries(peerCollections).map(([peerId, cols]) => (
+                <div key={peerId} className="space-y-1">
+                  <div className="px-2 py-1 flex items-center gap-2">
+                     <div className="w-1.5 h-1.5 rounded-full bg-white/20" />
+                     <span className="text-[11px] font-medium text-white/50 truncate max-w-[120px]">
+                       {peerId}
+                     </span>
+                  </div>
+                  {cols.map(col => (
+                    <div 
+                      key={col.id} 
+                      className="group mx-2 pl-4 pr-1 py-1.5 rounded-md hover:bg-white/5 flex items-center justify-between border border-transparent hover:border-white/5 transition-all duration-200"
+                    >
+                      <span className="text-xs text-secondary truncate group-hover:text-white/90">
+                        {col.name}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDownloadRequest(peerId, col.id);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-600/20 hover:bg-blue-600/40 text-[10px] text-blue-400 border border-blue-500/20 active:scale-95 transition-all"
+                      >
+                        <Upload className="w-3 h-3 rotate-180" />
+                        Request
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <DragOverlay adjustScale={true}>
           {activeId && activeType === 'request' && activeItem && (

@@ -98,6 +98,7 @@ function App() {
   const [localIdentity, setLocalIdentity] = useState<{ instance_name: string; ip_address: string } | null>(null);
   const [connectedPeerIps, setConnectedPeerIps] = useState<Record<string, boolean>>({});
   const [sharingPeerIp, setSharingPeerIp] = useState<string | null>(null);
+  const [peerCollections, setPeerCollections] = useState<Record<string, Array<{id: string, name: string, owner_id: string}>>>({});
 
   const [isSending, setIsSending] = useState(false);
   const [globals, setGlobals] = useState<Record<string, string>>({});
@@ -1047,15 +1048,32 @@ function App() {
     }
   }
 
+  async function sendTargetedSyncEvent(
+    peerIp: string,
+    action: SyncAction,
+    entityType: SyncEntityType,
+    entityId: string,
+    payload: unknown,
+  ) {
+    try {
+      const event = createSyncEvent(action, entityType, entityId, payload);
+      await sendSyncEventsToPeer(peerIp, [event]);
+    } catch (err) {
+      console.error(`Failed to send targeted event to ${peerIp}:`, err);
+    }
+  }
+
   async function applyRemoteSyncEvent(event: SyncEvent) {
     if (event.origin_device === localDeviceId) {
       return;
     }
 
     let payload: Record<string, unknown> = {};
+    let rawPayload: any = null;
     if (event.payload && event.payload.trim()) {
       try {
-        const parsed = JSON.parse(event.payload) as unknown;
+        const parsed = JSON.parse(event.payload);
+        rawPayload = parsed;
         if (parsed && typeof parsed === "object") {
           payload = parsed as Record<string, unknown>;
         }
@@ -1064,13 +1082,42 @@ function App() {
       }
     }
 
+    if (event.action === ("Metadata" as any)) {
+      if (Array.isArray(rawPayload)) {
+        setPeerCollections(prev => ({
+          ...prev,
+          [event.origin_device]: rawPayload
+        }));
+      }
+      return;
+    }
+
+    const peerIp = Object.entries(peers).find(([name]) => name === event.origin_device)?.[1] 
+                    || event.origin_device;
+
+    if (event.action === "RequestAccess") {
+      const colId = event.entity_id;
+      const colName = payload.name || "a collection";
+      openConfirm({
+        title: "Access Request",
+        description: `A collaborator (${peerIp}) wants to download "${colName}". Allow?`,
+        confirmLabel: "Grant Access",
+        onConfirm: () => {
+          handleGrantAccess(peerIp, colId);
+        }
+      });
+      return;
+    }
+
+    const isGrant = event.action === "GrantAccess";
+    const action = isGrant ? "Create" : event.action;
+
     if (event.entity_type === "Collection") {
-      if (event.action === "Delete") {
+      if (action === "Delete") {
         try {
           await invoke("delete_collection", { id: event.entity_id });
-        } catch {
-          // Ignore missing rows.
-        }
+        } catch { }
+
         setCollections((prev) => prev.filter((item) => item.id !== event.entity_id));
         setExpandedCollections((prev) => {
           const next = { ...prev };
@@ -1082,52 +1129,92 @@ function App() {
           delete next[event.entity_id];
           return next;
         });
+
         if (activeCollectionIdRef.current === event.entity_id) {
           setActiveCollectionId(null);
-          // If we want to close tabs for this collection, we could do it here
-          setOpenTabs((prev) => prev.filter((t) => !requestsByCollection[event.entity_id]?.some(r => r.id === t.requestId)));
+        }
+      } else {
+        const name =
+          typeof payload.name === "string" && payload.name.trim()
+            ? payload.name
+            : `Shared Collection ${event.entity_id.slice(0, 4)}`;
+        const ownerId =
+          typeof payload.owner_id === "string" && payload.owner_id.trim()
+            ? payload.owner_id
+            : LOCAL_USER_ID;
+
+        try {
+          const upserted = await invoke<Collection>("upsert_collection", {
+            id: event.entity_id,
+            workspaceId: activeWorkspaceId,
+            name,
+            ownerId,
+          });
+
+          setCollections((prev) => {
+            const idx = prev.findIndex((item) => item.id === upserted.id);
+            if (idx === -1) return [...prev, upserted];
+            const next = [...prev];
+            next[idx] = upserted;
+            return next;
+          });
+          setExpandedCollections((prev) => ({ ...prev, [upserted.id]: true }));
+        } catch (err) {
+          console.error("Failed to upsert remote collection:", err);
+        }
+      }
+      return;
+    }
+
+    if (event.entity_type === ("Folder" as any)) {
+      if (action === "Delete") {
+        try {
+          await invoke("delete_folder", { id: event.entity_id });
+        } catch { }
+        const collectionId = typeof payload.collection_id === "string" ? payload.collection_id : null;
+        if (collectionId) {
+          setFoldersByCollection((prev) => ({
+            ...prev,
+            [collectionId]: (prev[collectionId] || []).filter((f) => f.id !== event.entity_id),
+          }));
         }
         return;
       }
 
-      const name =
-        typeof payload.name === "string" && payload.name.trim()
-          ? payload.name
-          : `Shared Collection ${event.entity_id.slice(0, 4)}`;
-      const ownerId =
-        typeof payload.owner_id === "string" && payload.owner_id.trim()
-          ? payload.owner_id
-          : LOCAL_USER_ID;
-      const upserted = await invoke<Collection>("upsert_collection", {
+      const collectionId = typeof payload.collection_id === "string" ? payload.collection_id : null;
+      if (!collectionId) return;
+
+      const name = typeof payload.name === "string" ? payload.name : "Shared Folder";
+      const position = typeof payload.position === "number" ? payload.position : 0;
+
+      const upserted = await invoke<Folder>("upsert_folder", {
         id: event.entity_id,
-        workspaceId: activeWorkspaceId,
-        workspace_id: activeWorkspaceId,
+        collectionId,
+        collection_id: collectionId,
         name,
-        ownerId,
-        owner_id: ownerId,
+        position,
       });
-      setCollections((prev) => {
-        const idx = prev.findIndex((item) => item.id === upserted.id);
+
+      setFoldersByCollection((prev) => {
+        const current = prev[upserted.collection_id] || [];
+        const idx = current.findIndex((f) => f.id === upserted.id);
         if (idx === -1) {
-          return [...prev, upserted];
+          return { ...prev, [upserted.collection_id]: [...current, upserted] };
         }
-        const next = [...prev];
+        const next = [...current];
         next[idx] = upserted;
-        return next;
+        return { ...prev, [upserted.collection_id]: next };
       });
-      setExpandedCollections((prev) => ({ ...prev, [upserted.id]: true }));
       return;
     }
 
-    if (event.entity_type === "Request") {
-      if (event.action === "Delete") {
+    if (event.entity_type === ("Request" as any)) {
+      if (action === "Delete") {
         const payloadCollectionId =
           typeof payload.collection_id === "string" ? payload.collection_id : null;
         try {
           await invoke("delete_request", { id: event.entity_id });
-        } catch {
-          // Ignore missing rows.
-        }
+        } catch { }
         setRequestsByCollection((prev) => {
           if (payloadCollectionId && prev[payloadCollectionId]) {
             return {
@@ -1145,7 +1232,6 @@ function App() {
           return next;
         });
         if (activeTab?.requestId === event.entity_id) {
-          // If the currently viewed request was deleted, maybe close its tab
           const tabToClose = openTabs.find(t => t.requestId === event.entity_id);
           if (tabToClose) closeTabCore(tabToClose.id);
         }
@@ -1180,17 +1266,39 @@ function App() {
           ? payload.method.toUpperCase()
           : "GET";
       const url = typeof payload.url === "string" ? payload.url : "/";
+      const folderId = typeof payload.folder_id === "string" ? payload.folder_id : null;
+      const position = typeof payload.position === "number" ? payload.position : 0;
+      const preRequestScript = typeof payload.pre_request_script === "string" ? payload.pre_request_script : null;
+      const postRequestScript = typeof payload.post_request_script === "string" ? payload.post_request_script : null;
+      const bodyType = typeof payload.body_type === "string" ? payload.body_type : "raw";
+      const formData = typeof payload.form_data === "string" ? payload.form_data : null;
+      const binaryFilePath = typeof payload.binary_file_path === "string" ? payload.binary_file_path : null;
+
       const headers = normalizeHeadersForStorage(payload.headers);
       const body = normalizeBodyForStorage(payload.body);
+
       const upserted = await invoke<StoredRequest>("upsert_request", {
         id: event.entity_id,
         collectionId,
         collection_id: collectionId,
+        folderId,
+        folder_id: folderId,
         name,
         method,
         url,
         headers,
         body,
+        position,
+        preRequestScript,
+        pre_request_script: preRequestScript,
+        postRequestScript,
+        post_request_script: postRequestScript,
+        bodyType,
+        body_type: bodyType,
+        formData,
+        form_data: formData,
+        binaryFilePath,
+        binary_file_path: binaryFilePath,
       });
       setRequestsByCollection((prev) => {
         const current = prev[upserted.collection_id] || [];
@@ -1467,6 +1575,24 @@ function App() {
     loadWorkspaceData();
   }, [loadWorkspaceData]);
 
+  const broadcastCollectionsMetadata = useCallback(async () => {
+    if (Object.keys(peers).length === 0) return;
+    const metadata = collections.map(c => ({ id: c.id, name: c.name, owner_id: c.owner_id }));
+    void broadcastSyncEvent("Metadata" as any, "PeerMetadata" as any, localDeviceId, metadata);
+  }, [collections, peers, localDeviceId]);
+
+  useEffect(() => {
+    if (Object.keys(peers).length === 0) {
+      setPeerCollections({});
+      return;
+    }
+    const interval = setInterval(() => {
+      broadcastCollectionsMetadata();
+    }, 15000); 
+    broadcastCollectionsMetadata();
+    return () => clearInterval(interval);
+  }, [broadcastCollectionsMetadata, peers]);
+
   async function fetchRequests(collectionId: string) {
     setIsLoadingRequests(true);
     try {
@@ -1581,6 +1707,12 @@ function App() {
           [sourceCollectionId]: sourceFolders
         }));
       }
+
+      void broadcastSyncEvent("Update", "Folder", folderId, {
+        id: folderId,
+        collection_id: targetCollectionId,
+        position: targetPosition
+      });
 
       showToast({
         kind: "success",
@@ -1738,6 +1870,68 @@ function App() {
     });
   }
 
+  async function handleShareCollection(collectionId: string) {
+    const col = collections.find(c => c.id === collectionId);
+    if (!col) return;
+
+    // 1. Share Collection itself
+    void broadcastSyncEvent("Create", "Collection", col.id, col);
+
+    // 2. Share all Folders
+    const folders = foldersByCollection[collectionId] || [];
+    for (const folder of folders) {
+      void broadcastSyncEvent("Create", "Folder", folder.id, folder);
+    }
+
+    // 3. Share all Requests
+    const requests = requestsByCollection[collectionId] || [];
+    for (const request of requests) {
+      void broadcastSyncEvent("Create", "Request", request.id, request);
+    }
+
+    showToast({
+      kind: "success",
+      title: "Collection Shared",
+      description: `Broadcasted "${col.name}" to all Peers.`
+    });
+  }
+
+  async function handleRequestDownload(peerIp: string, collectionId: string) {
+    const colName = peerCollections[peerIp]?.find(c => c.id === collectionId)?.name || "Collection";
+    void sendTargetedSyncEvent(peerIp, "RequestAccess", "Collection", collectionId, { id: collectionId, name: colName });
+    showToast({
+      kind: "info",
+      title: "Request Sent",
+      description: `Asking permission for "${colName}"...`
+    });
+  }
+
+  async function handleGrantAccess(peerIp: string, collectionId: string) {
+    const col = collections.find(c => c.id === collectionId);
+    if (!col) return;
+
+    // 1. Grant Access (Collection)
+    void sendTargetedSyncEvent(peerIp, "GrantAccess", "Collection", col.id, col);
+
+    // 2. Grant Access (Folders)
+    const folders = foldersByCollection[collectionId] || [];
+    for (const folder of folders) {
+      void sendTargetedSyncEvent(peerIp, "GrantAccess", "Folder", folder.id, folder);
+    }
+
+    // 3. Grant Access (Requests)
+    const requests = requestsByCollection[collectionId] || [];
+    for (const request of requests) {
+      void sendTargetedSyncEvent(peerIp, "GrantAccess", "Request", request.id, request);
+    }
+
+    showToast({
+      kind: "success",
+      title: "Access Granted",
+      description: `Shared "${col.name}" with peer.`
+    });
+  }
+
   async function handleDuplicateFolder(folder: Folder) {
     openPrompt({
       title: "Duplicate Folder",
@@ -1760,6 +1954,7 @@ function App() {
           setExpandedFolders((prev) => ({ ...prev, [duplicated.id]: true }));
 
           await fetchRequests(duplicated.collection_id);
+          void broadcastSyncEvent("Create", "Folder", duplicated.id, duplicated);
           showToast({
             kind: "success",
             title: "Folder duplicated",
@@ -2657,7 +2852,10 @@ function App() {
             }}
             onHide={() => setIsSidebarVisible(false)}
             onCreateCollection={() => handleCreateCollectionClick()}
-
+            peerCollections={peerCollections}
+            onDownloadRequest={handleRequestDownload}
+            onShareCollection={handleShareCollection}
+            peersCount={Object.keys(peers).length}
             onCreateFolder={(collectionId) => {
               openPrompt({
                 title: "New Folder",
@@ -2678,6 +2876,7 @@ function App() {
                       [collectionId]: [...(prev[collectionId] || []), folder]
                     }));
                     setExpandedFolders(prev => ({ ...prev, [folder.id]: true }));
+                    void broadcastSyncEvent("Create", "Folder", folder.id, folder);
                   } catch (err) {
                     console.error("Failed to create folder:", err);
                   }
@@ -2703,6 +2902,7 @@ function App() {
                       ...prev,
                       [folder.collection_id]: (prev[folder.collection_id] || []).map(f => f.id === updated.id ? updated : f)
                     }));
+                    void broadcastSyncEvent("Update", "Folder", updated.id, updated);
                   } catch (err) {
                     console.error("Failed to rename folder:", err);
                   }
@@ -2729,6 +2929,7 @@ function App() {
                         [folder.collection_id]: current.filter(r => r.folder_id !== folder.id)
                       };
                     });
+                    void broadcastSyncEvent("Delete", "Folder", folder.id, { id: folder.id, collection_id: folder.collection_id });
                   } catch (err) {
                     console.error("Failed to delete folder:", err);
                   }
@@ -2745,11 +2946,10 @@ function App() {
             onDeleteRequest={handleDeleteRequest}
             onExportWorkspace={handleExportWorkspace}
             onImportWorkspace={handleImportWorkspace}
+            isLoadingRequests={isLoadingRequests}
             onHistory={() => setIsHistoryOpen(true)}
             onRunCollection={handleRunCollection}
             onRunFolder={handleRunFolder}
-            isLoadingRequests={isLoadingRequests}
-              peersCount={peersCount}
             />
           </div>
             <div
