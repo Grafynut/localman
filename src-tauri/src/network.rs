@@ -99,7 +99,11 @@ pub fn start_mdns(
     let ip_addr = physical_interfaces.iter()
         .find(|(name, ip)| {
             let n = name.to_lowercase();
-            ip.is_ipv4() && (n.contains("wi-fi") || n.contains("wifi") || n.contains("wlan"))
+            // Primary: WiFi or common Linux physical names (enp, eth, ens)
+            ip.is_ipv4() && (
+                n.contains("wi-fi") || n.contains("wifi") || n.contains("wlan") || 
+                n.starts_with("enp") || n.starts_with("eth") || n.starts_with("ens")
+            )
         })
         .map(|(_, ip)| *ip)
         .or_else(|| {
@@ -119,6 +123,18 @@ pub fn start_mdns(
             physical_interfaces.iter().find(|(_, ip)| ip.is_ipv4()).map(|(_, ip)| *ip)
         })
         .ok_or("No valid physical IPv4 address found. IPv6 is currently disabled for local syncing to ensure firewall compatibility. Please ensure your WiFi is active and has an IPv4 address.")?;
+
+    // Diagnostic: Check for NAT mode which breaks mDNS discovery
+    if let std::net::IpAddr::V4(v4) = ip_addr {
+        let octets = v4.octets();
+        if octets[0] == 10 && octets[1] == 0 && octets[2] == 2 {
+            println!("*************************************************");
+            println!("*   WARNING: NAT MODE DETECTED (10.0.2.x)       *");
+            println!("* Localman discovery will likely fail in NAT.   *");
+            println!("* Switch VM to 'Bridged Mode' to fix this.      *");
+            println!("*************************************************");
+        }
+    }
 
     let mut properties = HashMap::new();
     properties.insert("app".to_string(), "localman".to_string());
