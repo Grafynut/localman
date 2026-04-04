@@ -1,10 +1,11 @@
 import { useRef, useState, useEffect } from "react";
 import logo from "../assets/logo.png";
-import { Activity, ChevronDown, Plus, Search, Settings, User, Users, Keyboard, PanelLeft, PanelRight, Globe } from "lucide-react";
+import { Activity, ChevronDown, Plus, Search, Settings, User, Users, Keyboard, PanelLeft, PanelRight, Globe, Monitor } from "lucide-react";
 import type { Workspace, Environment } from "../types";
 import { EnvironmentSelector } from "./EnvironmentSelector";
 
 type Props = {
+  peers: Record<string, string>;
   peersCount: number;
   workspaces: Workspace[];
   activeWorkspaceId: string;
@@ -20,9 +21,11 @@ type Props = {
   isInspectorVisible: boolean;
   onToggleInspector: () => void;
   onOpenGlobals: () => void;
+  localIdentity: { instance_name: string; ip_address: string } | null;
 };
 
 export function TopBar({ 
+  peers,
   peersCount, 
   workspaces, 
   activeWorkspaceId, 
@@ -37,16 +40,22 @@ export function TopBar({
   onToggleSidebar,
   isInspectorVisible,
   onToggleInspector,
-  onOpenGlobals
+  onOpenGlobals,
+  localIdentity
 }: Props) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isPeersOpen, setIsPeersOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const peersRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsDropdownOpen(false);
+      }
+      if (peersRef.current && !peersRef.current.contains(event.target as Node)) {
+        setIsPeersOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -190,9 +199,67 @@ export function TopBar({
           <span className="text-method-get font-black text-[11px] uppercase tracking-widest hidden lg:inline">Connect: Online</span>
         </div>
 
-        <div className="flex items-center space-x-2 text-muted hover:text-gray-100 cursor-pointer transition-colors group">
-          <Users size={18} className="group-hover:text-primary transition-colors" />
-          <span className="text-[13px] font-bold">{peersCount}</span>
+        <div className="relative" ref={peersRef}>
+          <div 
+            onClick={() => setIsPeersOpen(!isPeersOpen)}
+            className="flex items-center space-x-2 text-muted hover:text-gray-100 cursor-pointer transition-colors group px-2 py-1 rounded-md hover:bg-surface-hover"
+            title="Online Peers"
+          >
+            <Users size={18} className={`${peersCount > 0 ? "text-primary" : "text-muted"} group-hover:text-primary transition-colors`} />
+            <span className="text-[13px] font-bold">{peersCount}</span>
+          </div>
+
+          {isPeersOpen && (
+            <div className="absolute top-full right-0 mt-2 w-64 bg-surface border border-border rounded-lg shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="px-3 py-2 border-b border-border bg-surface-hover/30">
+                <span className="text-[10px] font-black text-muted uppercase tracking-widest">Discovered Devices</span>
+              </div>
+              <div className="max-h-[200px] overflow-y-auto py-1 custom-scrollbar">
+                {localIdentity && (
+                  <div className="px-3 py-2 bg-primary/5 border-b border-border/50">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-6 h-6 rounded bg-primary/20 flex items-center justify-center border border-primary/30">
+                        <User size={12} className="text-primary" />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <div className="flex items-center space-x-1.5">
+                          <span className="text-[11px] font-black text-primary truncate">THIS DEVICE</span>
+                          <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-200 truncate">{localIdentity.instance_name.split(".")[0]}</span>
+                        <span className="text-[9px] font-mono text-primary/80">{localIdentity.ip_address}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {peersCount > 0 ? (
+                  Object.entries(peers).map(([name, ip]) => (
+                    <div key={name} className="px-3 py-2 hover:bg-white/5 transition-colors">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center border border-primary/20">
+                          <Monitor size={12} className="text-primary" />
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-[11px] font-bold text-gray-200 truncate">{name.split(".")[0]}</span>
+                          <span className="text-[9px] font-mono text-muted">{ip}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="px-3 py-4 text-center text-muted text-[11px] font-medium italic">
+                    Scanning for Localman instances...
+                  </div>
+                )}
+              </div>
+              <div className="p-2 border-t border-border bg-surface-hover/20">
+                <p className="text-[9px] text-muted text-center leading-relaxed">
+                  Devices running Localman on your network will appear here automatically.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center space-x-2 text-muted hover:text-gray-100 cursor-pointer transition-colors group">

@@ -30,7 +30,14 @@ pub async fn run() {
 
             // Start mDNS network discovery
             let app_handle = app.handle().clone();
-            let network_state = network::start_mdns(app_handle, "localman_host".to_string(), 8080)
+            let hostname = hostname::get()
+                .ok()
+                .and_then(|h| h.into_string().ok())
+                .unwrap_or_else(|| "localman_host".to_string());
+            let instance_name = format!("localman_{}", hostname);
+            
+            println!("Starting mDNS with instance name: {}", instance_name);
+            let network_state = network::start_mdns(app_handle, instance_name, 8080)
                 .expect("Failed to start mDNS daemon");
             app.manage(network_state);
 
@@ -75,7 +82,9 @@ pub async fn run() {
             ws_client::ws_send,
             ws_client::ws_disconnect,
             http::execute_request,
-            network::get_known_peers
+            network::get_known_peers,
+            network::get_local_identity,
+            network::send_sync_event
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

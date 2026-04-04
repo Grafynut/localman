@@ -7,7 +7,7 @@ use tauri::AppHandle;
 use tauri::Emitter;
 
 const SERVICE_TYPE: &str = "_localman._tcp.local.";
-const STALE_PEER_SECONDS: u64 = 12;
+const STALE_PEER_SECONDS: u64 = 60;
 
 #[derive(Clone)]
 pub struct KnownPeer {
@@ -15,9 +15,16 @@ pub struct KnownPeer {
     pub last_seen_unix: u64,
 }
 
+#[derive(serde::Serialize, Clone)]
+pub struct LocalIdentity {
+    pub instance_name: String,
+    pub ip_address: String,
+}
+
 pub struct NetworkState {
     pub daemon: ServiceDaemon,
     pub known_peers: Arc<Mutex<HashMap<String, KnownPeer>>>, // instance_name -> peer data
+    pub local_identity: LocalIdentity,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -31,12 +38,17 @@ use axum::{
     routing::get,
     Router,
 };
+use uuid::Uuid;
 
 pub fn start_mdns(
     app: AppHandle,
-    instance_name: String,
+    mut instance_name: String,
     port: u16,
 ) -> Result<NetworkState, String> {
+    // Add short random suffix for collision avoidance
+    let suffix = &Uuid::new_v4().to_string()[..4];
+    instance_name = format!("{}-{}", instance_name, suffix);
+
     // START WS SERVER
     let app_clone = app.clone();
     tokio::spawn(async move {
@@ -58,23 +70,58 @@ pub fn start_mdns(
 
     let mdns = ServiceDaemon::new().map_err(|e| e.to_string())?;
 
-    // 1. Broadcast ourselves on the local network
-    let ip_addrs = local_ip_address::list_afinet_netifas()
-        .map_err(|e: local_ip_address::Error| e.to_string())?
+    // 1. Get all network interfaces with their names and IPs
+    let all_interfaces = local_ip_address::list_afinet_netifas()
+        .map_err(|e: local_ip_address::Error| e.to_string())?;
+    
+    println!("--- Network Debug: Detected Interfaces ---");
+    for (name, ip) in &all_interfaces {
+        println!("  Interface: '{}' | IP: {}", name, ip);
+    }
+    println!("------------------------------------------");
+
+    // 2. Filter out clearly virtual/internal interfaces
+    let physical_interfaces = all_interfaces
         .into_iter()
-        .map(|(_, ip)| ip)
-        .filter(|ip: &std::net::IpAddr| !ip.is_loopback())
+        .filter(|(name, ip)| {
+            let n = name.to_lowercase();
+            !ip.is_loopback() && 
+            !n.contains("wsl") && 
+            !n.contains("vethernet") && 
+            !n.contains("virtual") && 
+            !n.contains("vmware") && 
+            !n.contains("docker") &&
+            !n.contains("pseudo")
+        })
         .collect::<Vec<_>>();
+
+    // 3. Selection Strategy: Force IPv4 for stability (Global IPv6 is often blocked)
+    let ip_addr = physical_interfaces.iter()
+        .find(|(name, ip)| {
+            let n = name.to_lowercase();
+            ip.is_ipv4() && (n.contains("wi-fi") || n.contains("wifi") || n.contains("wlan"))
+        })
+        .map(|(_, ip)| *ip)
+        .or_else(|| {
+            // Priority LAN IPv4 ranges
+            physical_interfaces.iter().find(|(_, ip)| match ip {
+                std::net::IpAddr::V4(v4) => {
+                    let octets = v4.octets();
+                    (octets[0] == 192 && octets[1] == 168) || // 192.168.x.x
+                    (octets[0] == 10) ||                      // 10.x.x.x
+                    (octets[0] == 172 && (16..=31).contains(&octets[1])) // 172.16-31.x.x
+                }
+                _ => false,
+            }).map(|(_, ip)| *ip)
+        })
+        .or_else(|| {
+            // Any physical IPv4
+            physical_interfaces.iter().find(|(_, ip)| ip.is_ipv4()).map(|(_, ip)| *ip)
+        })
+        .ok_or("No valid physical IPv4 address found. IPv6 is currently disabled for local syncing to ensure firewall compatibility. Please ensure your WiFi is active and has an IPv4 address.")?;
 
     let mut properties = HashMap::new();
     properties.insert("app".to_string(), "localman".to_string());
-
-    let ip_addr = ip_addrs
-        .iter()
-        .find(|ip| ip.is_ipv4())
-        .copied()
-        .or_else(|| ip_addrs.first().copied())
-        .ok_or("No valid IP address found on LAN")?;
 
     let service_info = ServiceInfo::new(
         SERVICE_TYPE,
@@ -82,13 +129,24 @@ pub fn start_mdns(
         &format!("{}.local.", instance_name),
         ip_addr.to_string(),
         port,
-        Some(properties),
+        Some(properties.clone()),
     )
     .map_err(|e| e.to_string())?;
 
-    mdns.register(service_info).map_err(|e| e.to_string())?;
+    mdns.register(service_info.clone()).map_err(|e| e.to_string())?;
+    
+    // Heartbeat Task: Periodically re-register to stay visible when minimized/backgrounded
+    let mdns_heartbeat = mdns.clone();
+    let service_info_heartbeat = service_info.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            let _ = mdns_heartbeat.register(service_info_heartbeat.clone());
+        }
+    });
+
     println!(
-        "Broadcasted localman instance '{}' on {}:{}",
+        "Broadcasted localman instance '{}' on {}:{} (IPv4 Only)",
         instance_name, ip_addr, port
     );
 
@@ -99,6 +157,8 @@ pub fn start_mdns(
     let local_instance_prefix = format!("{}.", instance_name);
 
     // Spawn background discovery task
+    let app_browse = app.clone();
+    let peers_browse = peers_clone.clone();
     tokio::spawn(async move {
         while let Ok(event) = receiver.recv_async().await {
             match event {
@@ -107,15 +167,16 @@ pub fn start_mdns(
                     if name.starts_with(&local_instance_prefix) {
                         continue;
                     }
+                    // STRICTLY ONLY IPv4 for peers to avoid connection timeouts
                     let ip = info
                         .get_addresses()
                         .iter()
                         .find(|ip| ip.is_ipv4())
-                        .or_else(|| info.get_addresses().iter().next())
                         .map(|ip| ip.to_string())
                         .unwrap_or_default();
+
                     if !ip.is_empty() {
-                        let mut peers = peers_clone.lock().unwrap();
+                        let mut peers = peers_browse.lock().unwrap();
                         peers.insert(
                             name.clone(),
                             KnownPeer {
@@ -123,24 +184,51 @@ pub fn start_mdns(
                                 last_seen_unix: now_unix_secs(),
                             },
                         );
-                        println!("Found peer: {} at {}", name, ip);
+                        println!("Found peer: {} at {} (IPv4)", name, ip);
 
-                        // Emit event to React frontend
-                        let _ = app.emit(
-                            "peer_found",
-                            PeerFoundEvent {
-                                instance_name: name,
-                                ip_address: ip,
-                            },
-                        );
+                        // Broadcast updated list to frontend
+                        let current_peers: HashMap<String, String> = peers
+                            .iter()
+                            .map(|(n, p)| (n.clone(), p.ip_address.clone()))
+                            .collect();
+                        let _ = app_browse.emit("peers_updated", current_peers);
                     }
                 }
                 ServiceEvent::ServiceRemoved(_service_type, fullname) => {
-                    let mut peers = peers_clone.lock().unwrap();
+                    let mut peers = peers_browse.lock().unwrap();
                     peers.remove(&fullname);
                     println!("Peer left: {}", fullname);
+                    
+                    // Broadcast updated list to frontend
+                    let current_peers: HashMap<String, String> = peers
+                        .iter()
+                        .map(|(n, p)| (n.clone(), p.ip_address.clone()))
+                        .collect();
+                    let _ = app_browse.emit("peers_updated", current_peers);
                 }
                 _ => {}
+            }
+        }
+    });
+
+    // Background Stale Checker: Ensure devices disappear accurately if they stop heartbeating
+    let app_stale = app.clone();
+    let peers_stale = known_peers.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            let mut peers = peers_stale.lock().unwrap();
+            let now = now_unix_secs();
+            let initial_count = peers.len();
+            peers.retain(|_, peer| now.saturating_sub(peer.last_seen_unix) <= STALE_PEER_SECONDS);
+            
+            if peers.len() != initial_count {
+                println!("Purged {} stale peers", initial_count - peers.len());
+                let current_peers: HashMap<String, String> = peers
+                    .iter()
+                    .map(|(n, p)| (n.clone(), p.ip_address.clone()))
+                    .collect();
+                let _ = app_stale.emit("peers_updated", current_peers);
             }
         }
     });
@@ -148,7 +236,16 @@ pub fn start_mdns(
     Ok(NetworkState {
         daemon: mdns,
         known_peers,
+        local_identity: LocalIdentity {
+            instance_name,
+            ip_address: ip_addr.to_string(),
+        },
     })
+}
+
+#[tauri::command]
+pub fn get_local_identity(state: tauri::State<'_, NetworkState>) -> LocalIdentity {
+    state.local_identity.clone()
 }
 
 #[tauri::command]
@@ -167,6 +264,32 @@ fn now_unix_secs() -> u64 {
         Ok(duration) => duration.as_secs(),
         Err(_) => 0,
     }
+}
+
+use futures::SinkExt;
+use tokio_tungstenite::connect_async;
+
+#[tauri::command]
+pub async fn send_sync_event(peer_ip: String, event: SyncEvent) -> Result<(), String> {
+    let raw_ip = peer_ip.trim().replace('[', "").replace(']', "");
+    let host = if raw_ip.contains(':') {
+        format!("[{}]", raw_ip)
+    } else {
+        raw_ip
+    };
+    
+    let url = format!("ws://{}:8080/ws", host);
+    println!("Rust: Connecting to {} to send sync event", url);
+    
+    let (mut ws_stream, _) = connect_async(url).await.map_err(|e| e.to_string())?;
+    
+    let payload = serde_json::to_string(&event).map_err(|e| e.to_string())?;
+    ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(payload.into()))
+        .await
+        .map_err(|e: tokio_tungstenite::tungstenite::Error| e.to_string())?;
+    
+    let _ = ws_stream.close(None).await;
+    Ok(())
 }
 
 async fn handle_websocket(mut socket: WebSocket, app: AppHandle) {

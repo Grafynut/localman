@@ -1,7 +1,7 @@
 {
   "name": "localman",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.4",
   "author": "Subhajit",
   "type": "module",
   "scripts": {

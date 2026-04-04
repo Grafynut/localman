@@ -1,0 +1,90 @@
+﻿cargo :     Checking localman v0.1.4 (S:\su
+bhajit\developments\rust\localman\src-tauri
+)
+At line:1 char:1
++ cargo check > build_errors.txt 2>&1
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified 
+   : (    Checking lo...lman\src-tauri):S  
+  tring) [], RemoteException
+    + FullyQualifiedErrorId : NativeComman 
+   dError
+ 
+error[E0432]: unresolved import 
+`futures_util`
+   --> src\network.rs:269:5
+    |
+269 | use futures_util::{SinkExt};
+    |     ^^^^^^^^^^^^ use of unresolved 
+module or unlinked crate `futures_util`
+    |
+    = help: if you wanted to use a crate 
+named `futures_util`, use `cargo add 
+futures_util` to add it to your 
+`Cargo.toml`
+
+error[E0599]: no method named `send` found 
+for struct `WebSocketStream<S>` in the 
+current scope
+   --> src\network.rs:287:15
+    |
+287 |     ws_stream.send(tokio_tungstenite:
+:tungstenite::Message::Text(payload.into())
+)
+    |               ^^^^
+    |
+   ::: C:\Users\subha\.cargo\registry\src\i
+ndex.crates.io-1949cf8c6b5b557f\futures-uti
+l-0.3.32\src\sink\mod.rs:220:8
+    |
+220 |     fn send(&mut self, item: Item) 
+-> Send<'_, Self, Item>
+    |        ---- the method is available 
+for `WebSocketStream<tokio_tungstenite::May
+beTlsStream<tokio::net::TcpStream>>` here
+    |
+    = help: items from traits can only be 
+used if the trait is in scope
+help: trait `SinkExt` which provides 
+`send` is implemented but not in scope; 
+perhaps you want to import it
+    |
+  1 + use futures::SinkExt;
+    |
+help: there is a method `send_all` with a 
+similar name
+    |
+287 |     ws_stream.send_all(tokio_tungsten
+ite::tungstenite::Message::Text(payload.int
+o()))
+    |                   ++++
+
+error[E0282]: type annotations needed
+   --> src\network.rs:287:5
+    |
+287 | /     ws_stream.send(tokio_tungstenit
+e::tungstenite::Message::Text(payload.into(
+)))
+288 | |         .await
+    | |______________^ cannot infer type
+
+error[E0282]: type annotations needed
+   --> src\network.rs:289:19
+    |
+289 |         .map_err(|e| e.to_string())?;
+    |                   ^  - type must be 
+known at this point
+    |
+help: consider giving this closure 
+parameter an explicit type
+    |
+289 |         .map_err(|e: /* Type */| 
+e.to_string())?;
+    |                    ++++++++++++
+
+Some errors have detailed explanations: 
+E0282, E0432, E0599.
+For more information about an error, try 
+`rustc --explain E0282`.
+error: could not compile `localman` (lib) 
+due to 4 previous errors

@@ -95,6 +95,7 @@ function App() {
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
 
   const [peers, setPeers] = useState<Record<string, string>>({});
+  const [localIdentity, setLocalIdentity] = useState<{ instance_name: string; ip_address: string } | null>(null);
   const [connectedPeerIps, setConnectedPeerIps] = useState<Record<string, boolean>>({});
   const [sharingPeerIp, setSharingPeerIp] = useState<string | null>(null);
 
@@ -379,31 +380,29 @@ function App() {
   }, [isResizing, isResizingSidebar, responseHeight, sidebarWidth]);
 
   useEffect(() => {
-    // We'll let the activeWorkspaceId useEffect handle the initial fetch
-    // once workspaces are loaded and an active ID is set.
+    invoke<any>("get_local_identity")
+      .then((id) => setLocalIdentity(id))
+      .catch((e) => console.error("Failed to fetch local identity:", e));
 
-    const interval = setInterval(() => {
-      invoke<Record<string, string>>("get_known_peers")
-        .then((discoveredPeers) => {
-          setPeers(discoveredPeers);
-          const availableIps = new Set(Object.values(discoveredPeers));
-          setConnectedPeerIps((prev) => {
-            const next: Record<string, boolean> = {};
-            Object.entries(prev).forEach(([ip, isConnected]) => {
-              if (isConnected && availableIps.has(ip)) {
-                next[ip] = true;
-              }
-            });
-            return next;
-          });
-        })
-        .catch(() => {
-          setPeers({});
-          setConnectedPeerIps({});
+    let unlisten: any;
+    listen<Record<string, string>>("peers_updated", (event) => {
+      const discoveredPeers = event.payload;
+      setPeers(discoveredPeers);
+      const availableIps = new Set(Object.values(discoveredPeers));
+      setConnectedPeerIps((prev) => {
+        const next: Record<string, boolean> = {};
+        Object.entries(prev).forEach(([ip, isConnected]) => {
+          if (isConnected && availableIps.has(ip)) {
+            next[ip] = true;
+          }
         });
-    }, 3000);
+        return next;
+      });
+    }).then((u) => (unlisten = u));
 
-    return () => clearInterval(interval);
+    return () => {
+      if (unlisten) unlisten();
+    };
   }, []);
 
   useEffect(() => {
@@ -1008,53 +1007,19 @@ function App() {
     };
   }
 
-  function buildPeerWsUrl(peerIp: string) {
-    const raw = peerIp.trim().replace(/^\[|\]$/g, "");
-    const host = raw.includes(":") ? `[${raw.replace(/%/g, "%25")}]` : raw;
-    return `ws://${host}:8080/ws`;
-  }
 
   async function sendSyncEventsToPeer(peerIp: string, events: SyncEvent[]) {
-    if (events.length === 0) {
-      return;
+    if (events.length === 0) return;
+
+    try {
+      // Use Rust backend for background stability
+      for (const event of events) {
+        await invoke("send_sync_event", { peerIp, event });
+      }
+    } catch (error: any) {
+      console.error(`Failed to sync with ${peerIp}:`, error);
+      throw error;
     }
-
-    await new Promise<void>((resolve, reject) => {
-      const ws = new window.WebSocket(buildPeerWsUrl(peerIp));
-      const timeout = window.setTimeout(() => {
-        ws.close();
-        reject(new Error(`Timed out connecting to ${peerIp}`));
-      }, 5000);
-      let settled = false;
-
-      ws.onopen = () => {
-        events.forEach((event) => ws.send(JSON.stringify(event)));
-        window.setTimeout(() => {
-          if (!settled) {
-            settled = true;
-            window.clearTimeout(timeout);
-            ws.close();
-            resolve();
-          }
-        }, 120);
-      };
-
-      ws.onerror = () => {
-        if (!settled) {
-          settled = true;
-          window.clearTimeout(timeout);
-          reject(new Error(`Could not connect to ${peerIp}:8080`));
-        }
-      };
-
-      ws.onclose = () => {
-        if (!settled) {
-          settled = true;
-          window.clearTimeout(timeout);
-          resolve();
-        }
-      };
-    });
   }
 
   async function broadcastSyncEvent(
@@ -2652,7 +2617,9 @@ function App() {
   return (
     <div className="flex flex-col h-screen w-full bg-[#121212] text-gray-200 font-sans overflow-hidden">
       <TopBar
+        peers={peers}
         peersCount={peersCount}
+        localIdentity={localIdentity}
         workspaces={workspaces}
         activeWorkspaceId={activeWorkspaceId}
         setActiveWorkspaceId={setActiveWorkspaceId}

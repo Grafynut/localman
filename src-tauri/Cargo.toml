@@ -1,7 +1,7 @@
 [package]
 name = "localman"
 default-run = "localman"
-version = "0.1.0"
+version = "0.1.4"
 description = "A Tauri App"
 authors = ["Subhajit"]
 edition = "2021"
@@ -47,4 +47,4 @@ base64 = "0.22.1"
 tokio-tungstenite = { version = "0.26.1", features = ["rustls-tls-webpki-roots"] }
 http = "1"
 clap = { version = "4.5.30", features = ["derive"] }
-
+hostname = "0.4.0"
