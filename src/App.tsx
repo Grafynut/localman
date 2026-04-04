@@ -103,6 +103,22 @@ function App() {
 
   const [isSending, setIsSending] = useState(false);
   const [globals, setGlobals] = useState<Record<string, string>>({});
+  const globalsRef = useRef<Record<string, string>>(globals);
+
+  useEffect(() => {
+    globalsRef.current = globals;
+  }, [globals]);
+
+  // Live Auto-Sync Global Variables
+  useEffect(() => {
+    if (Object.keys(peers).length === 0) return;
+
+    const timer = setTimeout(() => {
+      void broadcastSyncEvent("Update", "Global", "global_settings_1", globals, true);
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [globals, peers]);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [isInspectorVisible, setIsInspectorVisible] = useState(true);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -1179,6 +1195,7 @@ function App() {
           typeof payload.owner_id === "string" && payload.owner_id.trim()
             ? payload.owner_id
             : LOCAL_USER_ID;
+        const position = typeof payload.position === "number" ? payload.position : 0;
 
         try {
           const upserted = await invoke<Collection>("upsert_collection", {
@@ -1186,19 +1203,34 @@ function App() {
             workspaceId: activeWorkspaceId,
             name,
             ownerId,
+            position,
           });
 
           setCollections((prev) => {
             const idx = prev.findIndex((item) => item.id === upserted.id);
-            if (idx === -1) return [...prev, upserted];
+            if (idx === -1) {
+              const next = [...prev, upserted];
+              return next.sort((a, b) => (a.position || 0) - (b.position || 0));
+            }
             const next = [...prev];
             next[idx] = upserted;
-            return next;
+            return next.sort((a, b) => (a.position || 0) - (b.position || 0));
           });
           setExpandedCollections((prev) => ({ ...prev, [upserted.id]: true }));
         } catch (err) {
           console.error("Failed to upsert remote collection:", err);
         }
+      }
+      return;
+    }
+
+    if (event.entity_type === ("Global" as any)) {
+      if (action === "Update") {
+        const remoteGlobals = payload as Record<string, string>;
+        // Merge strategy: Overwrite for now, or we could do key-by-key merge.
+        // User asked to "auto shares", so syncing the whole set is appropriate.
+        setGlobals(prev => ({ ...prev, ...remoteGlobals }));
+        void invoke("update_globals", { variables: JSON.stringify({ ...globalsRef.current, ...remoteGlobals }) });
       }
       return;
     }
@@ -1778,6 +1810,39 @@ function App() {
       showToast({
         kind: "error",
         title: "Error moving folder",
+        description: String(error),
+      });
+    }
+  }
+
+  async function handleMoveCollection(collectionId: string, targetWorkspaceId: string, targetPosition: number) {
+    try {
+      await invoke("update_collection_location", {
+        id: collectionId,
+        workspaceId: targetWorkspaceId,
+        position: targetPosition
+      });
+
+      // Reload collections for this workspace
+      const nextCols = await invoke<Collection[]>("get_collections", { workspaceId: targetWorkspaceId });
+      setCollections(nextCols);
+
+      void broadcastSyncEvent("Update", "Collection", collectionId, {
+        id: collectionId,
+        workspace_id: targetWorkspaceId,
+        position: targetPosition
+      });
+
+      showToast({
+        kind: "success",
+        title: "Collection reordered",
+        description: "Sidebar arrangement updated."
+      });
+    } catch (error) {
+      console.error("Move collection error:", error);
+      showToast({
+        kind: "error",
+        title: "Error reordering collection",
         description: String(error),
       });
     }
@@ -2992,12 +3057,14 @@ function App() {
             }}
             onDuplicateFolder={handleDuplicateFolder}
             onMoveFolder={handleMoveFolder}
+            onMoveCollection={handleMoveCollection}
             onMoveRequest={handleMoveRequest}
             onCopyRequest={handleCopyRequest}
             onPasteRequest={handlePasteRequest}
             onRenameRequest={handleRenameRequest}
             onDuplicateRequest={handleDuplicateRequest}
             onDeleteRequest={handleDeleteRequest}
+            activeWorkspaceId={activeWorkspaceId}
             onExportWorkspace={handleExportWorkspace}
             onImportWorkspace={handleImportWorkspace}
             isLoadingRequests={isLoadingRequests}

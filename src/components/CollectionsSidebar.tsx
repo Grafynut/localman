@@ -45,6 +45,7 @@ type Props = {
   onDuplicateFolder: (folder: Folder) => void;
   onDeleteFolder: (folder: Folder) => void;
   onMoveFolder: (folderId: string, targetCollectionId: string, targetPosition: number) => void;
+  onMoveCollection: (collectionId: string, targetWorkspaceId: string, targetPosition: number) => void;
   onMoveRequest: (requestId: string, targetCollectionId: string, targetFolderId: string | null, targetPosition: number) => void;
   onCopyRequest: (request: StoredRequest) => void;
   onPasteRequest: (collectionId: string, folderId?: string | null) => void;
@@ -63,6 +64,7 @@ type Props = {
   peerCollections: Record<string, Array<{id: string, name: string, owner_id: string}>>;
   onDownloadRequest: (peerIpId: string, collectionId: string) => void;
   onHide?: () => void;
+  activeWorkspaceId?: string | null;
 };
 
 interface CollectionHeaderProps {
@@ -529,6 +531,7 @@ export function CollectionsSidebar({
   onDuplicateFolder,
   onDeleteFolder,
   onMoveFolder,
+  onMoveCollection,
   onMoveRequest,
   onCopyRequest,
   onPasteRequest,
@@ -547,6 +550,7 @@ export function CollectionsSidebar({
   peerCollections,
   onDownloadRequest,
   onHide,
+  activeWorkspaceId,
 }: Props) {
   const [openCollectionMenuId, setOpenCollectionMenuId] = useState<string | null>(null);
   const [openFolderMenuId, setOpenFolderMenuId] = useState<string | null>(null);
@@ -654,6 +658,9 @@ export function CollectionsSidebar({
     } else if (activeData?.type === 'folder') {
       const folderId = active.id as string;
       onMoveFolder(folderId, targetCollectionId, targetPosition);
+    } else if (activeData?.type === 'collection') {
+      const collectionId = active.id as string;
+      onMoveCollection(collectionId, activeWorkspaceId || "default_workspace", targetPosition);
     }
   };
 
@@ -760,90 +767,57 @@ export function CollectionsSidebar({
                   No collections yet.
                 </div>
               ) : (
-                collections.map((collection) => {
-                  const expanded = !!expandedCollections[collection.id];
-                  const active = activeCollectionId === collection.id;
-                  const folders = foldersByCollection[collection.id] || [];
-                  const rootRequests = (requestsByCollection[collection.id] || []).filter(r => !r.folder_id);
+                <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>
+                  {collections.map((collection) => {
+                    const expanded = !!expandedCollections[collection.id];
+                    const active = activeCollectionId === collection.id;
+                    const folders = foldersByCollection[collection.id] || [];
+                    const rootRequests = (requestsByCollection[collection.id] || []).filter(r => !r.folder_id);
 
-                  return (
-                    <div key={collection.id} className="flex flex-col">
-                      <CollectionHeader
-                        collection={collection}
-                        active={active}
-                        expanded={expanded}
-                        onSelect={() => {
-                          setActiveCollectionId(collection.id);
-                          toggleCollectionExpanded(collection.id);
-                        }}
-                        onRun={() => onRunCollection(collection)}
-                        onCopy={() => onCopyCollection(collection)}
-                        onRename={() => onRenameCollection(collection)}
-                        onDuplicate={() => onDuplicateCollection(collection)}
-                        onDelete={() => onDeleteCollection(collection)}
-                        onShare={() => onShareCollection(collection.id)}
-                        peersCount={peersCount}
-                        setMenuId={setOpenCollectionMenuId}
-                        isOpen={openCollectionMenuId === collection.id}
-                      />
+                    return (
+                      <div key={collection.id} className="flex flex-col">
+                        <CollectionHeader
+                          collection={collection}
+                          active={active}
+                          expanded={expanded}
+                          onSelect={() => {
+                            setActiveCollectionId(collection.id);
+                            toggleCollectionExpanded(collection.id);
+                          }}
+                          onRun={() => onRunCollection(collection)}
+                          onCopy={() => onCopyCollection(collection)}
+                          onRename={() => onRenameCollection(collection)}
+                          onDuplicate={() => onDuplicateCollection(collection)}
+                          onDelete={() => onDeleteCollection(collection)}
+                          onShare={() => onShareCollection(collection.id)}
+                          peersCount={peersCount}
+                          setMenuId={setOpenCollectionMenuId}
+                          isOpen={openCollectionMenuId === collection.id}
+                        />
 
-                      {expanded && (
-                        <div className="ml-4 py-1">
-                          {/* Folders List */}
-                          <SortableContext items={folders.map(f => f.id)} strategy={verticalListSortingStrategy}>
-                            {folders.map((folder) => (
-                              <FolderItem
-                                key={folder.id}
-                                folder={folder}
-                                expandedFolders={expandedFolders}
-                                toggleFolderExpanded={toggleFolderExpanded}
-                                requestsByCollection={requestsByCollection}
-                                activeRequestId={activeRequestId}
-                                activeRequestIsDirty={activeRequestIsDirty}
-                                onSelectRequest={onSelectRequest}
-                                onCreateRequest={onCreateRequest}
-                                onRenameFolder={onRenameFolder}
-                                onDuplicateFolder={onDuplicateFolder}
-                                onDeleteFolder={onDeleteFolder}
-                                onRunFolder={onRunFolder}
-                                openFolderMenuId={openFolderMenuId}
-                                setOpenFolderMenuId={setOpenFolderMenuId}
-                                openRequestMenuId={openRequestMenuId}
-                                setOpenRequestMenuId={setOpenRequestMenuId}
-                                requestMenuKey={requestMenuKey}
-                                onCopyRequest={onCopyRequest}
-                                onPasteRequest={onPasteRequest}
-                                onRenameRequest={onRenameRequest}
-                                onDuplicateRequest={onDuplicateRequest}
-                                onDeleteRequest={onDeleteRequest}
-                              />
-                            ))}
-                          </SortableContext>
-
-                          {/* Root Requests */}
-                          <div className="mt-2 space-y-1">
-                            <div className="px-4 py-1 flex items-center justify-between text-[10px] text-muted font-black uppercase tracking-widest opacity-60">
-                              <span>Requests</span>
-                              <div className="flex items-center space-x-1">
-                                <button onClick={() => onCreateFolder(collection.id)} className="p-0.5 hover:text-primary transition-colors">
-                                  <FolderIcon size={12} />
-                                </button>
-                                <button onClick={() => onCreateRequest(collection.id, null)} className="p-0.5 hover:text-primary transition-colors">
-                                  <Plus size={12} strokeWidth={3} />
-                                </button>
-                              </div>
-                            </div>
-
-                            <SortableContext items={rootRequests.map(r => r.id)} strategy={verticalListSortingStrategy}>
-                              {rootRequests.map((request) => (
-                                <RequestItem
-                                  key={request.id}
-                                  request={request}
+                        {expanded && (
+                          <div className="ml-4 py-1">
+                            {/* Folders List */}
+                            <SortableContext items={folders.map(f => f.id)} strategy={verticalListSortingStrategy}>
+                              {folders.map((folder) => (
+                                <FolderItem
+                                  key={folder.id}
+                                  folder={folder}
+                                  expandedFolders={expandedFolders}
+                                  toggleFolderExpanded={toggleFolderExpanded}
+                                  requestsByCollection={requestsByCollection}
                                   activeRequestId={activeRequestId}
                                   activeRequestIsDirty={activeRequestIsDirty}
                                   onSelectRequest={onSelectRequest}
-                                  setOpenRequestMenuId={setOpenRequestMenuId}
+                                  onCreateRequest={onCreateRequest}
+                                  onRenameFolder={onRenameFolder}
+                                  onDuplicateFolder={onDuplicateFolder}
+                                  onDeleteFolder={onDeleteFolder}
+                                  onRunFolder={onRunFolder}
+                                  openFolderMenuId={openFolderMenuId}
+                                  setOpenFolderMenuId={setOpenFolderMenuId}
                                   openRequestMenuId={openRequestMenuId}
+                                  setOpenRequestMenuId={setOpenRequestMenuId}
                                   requestMenuKey={requestMenuKey}
                                   onCopyRequest={onCopyRequest}
                                   onPasteRequest={onPasteRequest}
@@ -853,12 +827,47 @@ export function CollectionsSidebar({
                                 />
                               ))}
                             </SortableContext>
+
+                            {/* Root Requests */}
+                            <div className="mt-2 space-y-1">
+                              <div className="px-4 py-1 flex items-center justify-between text-[10px] text-muted font-black uppercase tracking-widest opacity-60">
+                                <span>Requests</span>
+                                <div className="flex items-center space-x-1">
+                                  <button onClick={() => onCreateFolder(collection.id)} className="p-0.5 hover:text-primary transition-colors">
+                                    <FolderIcon size={12} />
+                                  </button>
+                                  <button onClick={() => onCreateRequest(collection.id, null)} className="p-0.5 hover:text-primary transition-colors">
+                                    <Plus size={12} strokeWidth={3} />
+                                  </button>
+                                </div>
+                              </div>
+
+                              <SortableContext items={rootRequests.map(r => r.id)} strategy={verticalListSortingStrategy}>
+                                {rootRequests.map((request) => (
+                                  <RequestItem
+                                    key={request.id}
+                                    request={request}
+                                    activeRequestId={activeRequestId}
+                                    activeRequestIsDirty={activeRequestIsDirty}
+                                    onSelectRequest={onSelectRequest}
+                                    setOpenRequestMenuId={setOpenRequestMenuId}
+                                    openRequestMenuId={openRequestMenuId}
+                                    requestMenuKey={requestMenuKey}
+                                    onCopyRequest={onCopyRequest}
+                                    onPasteRequest={onPasteRequest}
+                                    onRenameRequest={onRenameRequest}
+                                    onDuplicateRequest={onDuplicateRequest}
+                                    onDeleteRequest={onDeleteRequest}
+                                  />
+                                ))}
+                              </SortableContext>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
+                        )}
+                      </div>
+                    );
+                  })}
+                </SortableContext>
               )}
             </div>
           </div>

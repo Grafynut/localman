@@ -18,7 +18,8 @@ export type Collection = {
   workspace_id: string;
   name: string;
   owner_id: string;
-  created_at: string;
+  position: number;
+  created_at?: string;
 };
 
 export type StoredRequest = {
@@ -121,7 +122,7 @@ export type WsStatus = {
 };
 
 export type SyncAction = "Create" | "Update" | "Delete" | "Metadata" | "RequestAccess" | "GrantAccess" | "DenyAccess";
-export type SyncEntityType = "Collection" | "Folder" | "Request" | "PeerMetadata";
+export type SyncEntityType = "Collection" | "Folder" | "Request" | "PeerMetadata" | "Global";
 
 export type SyncEvent = {
   event_id: string;

@@ -56,6 +56,7 @@ pub async fn run() {
             db::get_folders,
             db::update_folder_location,
             db::update_request_location,
+            db::update_collection_location,
             db::create_collection,
             db::get_collections,
             db::upsert_collection,

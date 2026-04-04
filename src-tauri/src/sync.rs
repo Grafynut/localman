@@ -17,6 +17,7 @@ pub enum EntityType {
     Folder,
     Request,
     PeerMetadata,
+    Global,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

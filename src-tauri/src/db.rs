@@ -112,6 +112,10 @@ pub fn init_db(
         "ALTER TABLE collections ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default_workspace'",
         [],
     );
+    let _ = conn.execute(
+        "ALTER TABLE collections ADD COLUMN position INTEGER DEFAULT 0",
+        [],
+    );
     // folder_id and position for requests
     let _ = conn.execute("ALTER TABLE requests ADD COLUMN folder_id TEXT", []);
     let _ = conn.execute(
@@ -232,6 +236,7 @@ pub struct Collection {
     pub workspace_id: String,
     pub name: String,
     pub owner_id: String,
+    pub position: i32,
     pub created_at: String,
 }
 
@@ -267,7 +272,7 @@ pub struct Environment {
 fn fetch_collection_by_id(conn: &Connection, id: &str) -> std::result::Result<Collection, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, workspace_id, name, owner_id, created_at FROM collections WHERE id = ?1",
+            "SELECT id, workspace_id, name, owner_id, position, created_at FROM collections WHERE id = ?1",
         )
         .map_err(|e| e.to_string())?;
     let mut rows = stmt.query([id]).map_err(|e| e.to_string())?;
@@ -277,7 +282,8 @@ fn fetch_collection_by_id(conn: &Connection, id: &str) -> std::result::Result<Co
             workspace_id: row.get(1).unwrap_or_default(),
             name: row.get(2).unwrap_or_default(),
             owner_id: row.get(3).unwrap_or_default(),
-            created_at: row.get(4).unwrap_or_default(),
+            position: row.get(4).unwrap_or_default(),
+            created_at: row.get(5).unwrap_or_default(),
         })
     } else {
         Err("Collection not found".to_string())
@@ -340,12 +346,13 @@ pub fn create_collection(
     workspace_id: String,
     name: String,
     owner_id: String,
+    position: i32,
 ) -> std::result::Result<Collection, String> {
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         conn.execute(
-            "INSERT INTO collections (id, workspace_id, name, owner_id) VALUES (?1, ?2, ?3, ?4)",
-            (&id, &workspace_id, &name, &owner_id),
+            "INSERT INTO collections (id, workspace_id, name, owner_id, position) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (&id, &workspace_id, &name, &owner_id, &position),
         )
         .map_err(|e| e.to_string())?;
 
@@ -363,7 +370,7 @@ pub fn get_collections(
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         let mut stmt = conn
-            .prepare("SELECT id, workspace_id, name, owner_id, created_at FROM collections WHERE workspace_id = ?1")
+            .prepare("SELECT id, workspace_id, name, owner_id, position, created_at FROM collections WHERE workspace_id = ?1 ORDER BY position ASC")
             .map_err(|e| e.to_string())?;
         let collection_iter = stmt
             .query_map([&workspace_id], |row| {
@@ -372,7 +379,8 @@ pub fn get_collections(
                     workspace_id: row.get(1).unwrap_or_default(),
                     name: row.get(2).unwrap_or_default(),
                     owner_id: row.get(3).unwrap_or_default(),
-                    created_at: row.get(4).unwrap_or_default(),
+                    position: row.get(4).unwrap_or_default(),
+                    created_at: row.get(5).unwrap_or_default(),
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -396,17 +404,19 @@ pub fn upsert_collection(
     workspace_id: String,
     name: String,
     owner_id: String,
+    position: i32,
 ) -> std::result::Result<Collection, String> {
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         conn.execute(
-            "INSERT INTO collections (id, workspace_id, name, owner_id)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO collections (id, workspace_id, name, owner_id, position)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(id) DO UPDATE SET
                workspace_id = excluded.workspace_id,
                name = excluded.name,
-               owner_id = excluded.owner_id",
-            (&id, &workspace_id, &name, &owner_id),
+               owner_id = excluded.owner_id,
+               position = excluded.position",
+            (&id, &workspace_id, &name, &owner_id, &position),
         )
         .map_err(|e| e.to_string())?;
 
@@ -461,6 +471,45 @@ pub fn delete_collection(
 }
 
 #[tauri::command]
+pub fn update_collection_location(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    workspace_id: String,
+    position: i32,
+) -> std::result::Result<(), String> {
+    let lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_ref() {
+        // 1. Fetch all collections in the target workspace, excluding the one we're moving
+        let mut stmt = conn
+            .prepare("SELECT id FROM collections WHERE workspace_id = ?1 AND id != ?2 ORDER BY position ASC, created_at ASC")
+            .map_err(|e| e.to_string())?;
+
+        let mut collection_ids: Vec<String> = stmt
+            .query_map([&workspace_id, &id], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        // 2. Insert the moved collection at the desired index
+        let target_idx = (position as usize).min(collection_ids.len());
+        collection_ids.insert(target_idx, id.clone());
+
+        // 3. Update all collections with new sequential positions
+        for (idx, col_id) in collection_ids.iter().enumerate() {
+            conn.execute(
+                "UPDATE collections SET workspace_id = ?1, position = ?2 WHERE id = ?3",
+                (&workspace_id, idx as i32, col_id),
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
+        Ok(())
+    } else {
+        Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
 pub fn duplicate_collection(
     state: tauri::State<'_, AppState>,
     source_id: String,
@@ -471,8 +520,8 @@ pub fn duplicate_collection(
     if let Some(conn) = lock.as_ref() {
         let source = fetch_collection_by_id(conn, &source_id)?;
         conn.execute(
-            "INSERT INTO collections (id, workspace_id, name, owner_id) VALUES (?1, ?2, ?3, ?4)",
-            (&new_id, &source.workspace_id, &new_name, &source.owner_id),
+            "INSERT INTO collections (id, workspace_id, name, owner_id, position) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (&new_id, &source.workspace_id, &new_name, &source.owner_id, &source.position),
         )
         .map_err(|e| e.to_string())?;
 
