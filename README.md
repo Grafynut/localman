@@ -32,6 +32,11 @@ Download the latest **.msi** installer or **standalone .exe** from our [Releases
 - **Real-time Monitoring**: Track progress, pass/fail rates, and average response times.
 - **CLI Runner**: A dedicated high-performance Rust CLI (`cli_runner`) for executing collections directly from the terminal.
 
+### 📝 Integrated Documentation
+- **Markdown Support**: Document your API endpoints, folders, and collections using full GitHub-Flavored Markdown.
+- **Rich Preview**: Toggle between a high-performance editor and a sleek, rendered preview.
+- **Persistent & Synced**: All documentation is stored in your local SQLite database and synchronized across your P2P workspace.
+
 ### 🎨 Modern UX/UI
 - **Optimized for Productivity**: Sleek, glassmorphic Dark Mode designed to reduce eye strain.
 - **Visual Previews**: Pretty-printing for JSON/HTML and a sandboxed preview for images and web content.
