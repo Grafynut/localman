@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Search, Globe, Folder, Terminal, Command, X, ChevronRight } from "lucide-react";
+import { Search, Globe, Folder, Terminal, Command, ChevronRight } from "lucide-react";
 import type { StoredRequest, Folder as FolderType, Environment, Collection } from "../types";
 
 export type SearchItem = {
@@ -144,11 +144,11 @@ export function GlobalSearch({
 
   return (
     <div className="fixed inset-0 z-[200] flex items-start justify-center pt-[15vh] px-4">
-      <div 
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200" 
-        onClick={onClose} 
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+        onClick={onClose}
       />
-      
+
       <div className="relative w-full max-w-2xl bg-surface border border-border shadow-2xl rounded-xl flex flex-col overflow-hidden animate-in slide-in-from-top-4 duration-200">
         <div className="flex items-center px-4 h-14 border-b border-border bg-surface/50">
           <Search size={18} className="text-muted mr-3" />
@@ -166,7 +166,7 @@ export function GlobalSearch({
           </div>
         </div>
 
-        <div 
+        <div
           ref={scrollRef}
           className="max-h-[400px] overflow-y-auto py-2 custom-scrollbar"
         >
@@ -179,19 +179,17 @@ export function GlobalSearch({
               <div
                 key={`${item.type}-${item.id}`}
                 data-index={index}
-                className={`px-4 py-2.5 cursor-pointer flex items-center group transition-colors ${
-                  selectedIndex === index 
-                    ? "bg-primary/20 text-primary" 
+                className={`px-4 py-2.5 cursor-pointer flex items-center group transition-colors ${selectedIndex === index
+                    ? "bg-primary/20 text-primary"
                     : "text-gray-300 hover:bg-white/5"
-                }`}
+                  }`}
                 onClick={() => {
                   onSelectItem(item);
                   onClose();
                 }}
               >
-                <div className={`w-8 h-8 rounded flex items-center justify-center shrink-0 mr-3 ${
-                  selectedIndex === index ? "bg-primary/20" : "bg-surface-hover border border-border"
-                }`}>
+                <div className={`w-8 h-8 rounded flex items-center justify-center shrink-0 mr-3 ${selectedIndex === index ? "bg-primary/20" : "bg-surface-hover border border-border"
+                  }`}>
                   {item.type === "request" && <Terminal size={14} className={selectedIndex === index ? "text-primary" : "text-muted"} />}
                   {item.type === "folder" && <Folder size={14} className={selectedIndex === index ? "text-primary" : "text-muted"} />}
                   {item.type === "environment" && <Globe size={14} className={selectedIndex === index ? "text-primary" : "text-muted"} />}
@@ -203,13 +201,12 @@ export function GlobalSearch({
                       {item.name}
                     </span>
                     {item.method && (
-                      <span className={`ml-2 text-[10px] font-black px-1.5 py-0.5 rounded leading-none ${
-                        item.method === 'GET' ? 'text-method-get bg-method-get/10' :
-                        item.method === 'POST' ? 'text-method-post bg-method-post/10' :
-                        item.method === 'PUT' ? 'text-method-put bg-method-put/10' :
-                        item.method === 'DELETE' ? 'text-method-delete bg-method-delete/10' :
-                        'text-primary bg-primary/10'
-                      }`}>
+                      <span className={`ml-2 text-[10px] font-black px-1.5 py-0.5 rounded leading-none ${item.method === 'GET' ? 'text-method-get bg-method-get/10' :
+                          item.method === 'POST' ? 'text-method-post bg-method-post/10' :
+                            item.method === 'PUT' ? 'text-method-put bg-method-put/10' :
+                              item.method === 'DELETE' ? 'text-method-delete bg-method-delete/10' :
+                                'text-primary bg-primary/10'
+                        }`}>
                         {item.method}
                       </span>
                     )}
