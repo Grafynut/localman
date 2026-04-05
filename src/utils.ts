@@ -20,6 +20,10 @@ export function defaultHeaders(): KeyValuePair[] {
   ];
 }
 
+export function defaultParams(): KeyValuePair[] {
+  return [emptyKeyValueRow()];
+}
+
 export function methodColor(method: string) {
   switch (method.toUpperCase()) {
     case "GET":
@@ -60,8 +64,17 @@ export function parseHeadersToRows(headersJson?: string | null): KeyValuePair[] 
   }
 
   try {
-    const parsed = JSON.parse(headersJson) as Record<string, string>;
-    const rows = Object.entries(parsed).map(([key, value]) => ({
+    const parsed = JSON.parse(headersJson);
+    
+    // Check if it's the new array format
+    if (Array.isArray(parsed)) {
+      const rows = parsed.filter(row => row.key.trim() || row.value.trim());
+      return rows.length > 0 ? [...rows, emptyKeyValueRow()] : defaultHeaders();
+    }
+    
+    // Fallback for old flat object format
+    const flat = parsed as Record<string, string>;
+    const rows = Object.entries(flat).map(([key, value]) => ({
       id: generateId(),
       key,
       value,
@@ -70,6 +83,34 @@ export function parseHeadersToRows(headersJson?: string | null): KeyValuePair[] 
     return rows.length > 0 ? [...rows, emptyKeyValueRow()] : defaultHeaders();
   } catch {
     return defaultHeaders();
+  }
+}
+
+export function parseParamsToRows(paramsJson?: string | null): KeyValuePair[] {
+  if (!paramsJson) {
+    return defaultParams();
+  }
+
+  try {
+    const parsed = JSON.parse(paramsJson);
+    
+    // Check if it's the new array format
+    if (Array.isArray(parsed)) {
+      const rows = parsed.filter(row => row.key.trim() || row.value.trim());
+      return rows.length > 0 ? [...rows, emptyKeyValueRow()] : defaultParams();
+    }
+    
+    // Fallback for old flat object format (unlikely for params but good for safety)
+    const flat = parsed as Record<string, string>;
+    const rows = Object.entries(flat).map(([key, value]) => ({
+      id: generateId(),
+      key,
+      value,
+      enabled: true,
+    }));
+    return rows.length > 0 ? [...rows, emptyKeyValueRow()] : defaultParams();
+  } catch {
+    return defaultParams();
   }
 }
 

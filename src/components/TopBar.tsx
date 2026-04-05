@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect } from "react";
 import logo from "../assets/logo.png";
 import { invoke } from "@tauri-apps/api/core";
-import { Activity, ChevronDown, Plus, Search, Settings, User, Users, Keyboard, PanelLeft, PanelRight, Globe, Monitor, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, Search, Settings, User, Users, Keyboard, PanelLeft, PanelRight, Globe, Monitor, Trash2 } from "lucide-react";
 import type { Workspace, Environment } from "../types";
 import { EnvironmentSelector } from "./EnvironmentSelector";
 
@@ -103,10 +103,9 @@ export function TopBar({
         </button>
 
         <div className="flex items-center space-x-2 text-primary">
-          <div className="w-7 h-7 flex items-center justify-center">
+          <div className="w-6 h-6 flex items-center justify-center">
             <img src={logo} alt="Localman Logo" className="w-full h-full object-contain" />
           </div>
-          <span className="font-black text-[16px] tracking-tight text-white uppercase italic">Localman</span>
         </div>
 
         <div className="relative" ref={dropdownRef}>
@@ -189,13 +188,6 @@ export function TopBar({
           )}
         </div>
 
-        <button
-          onClick={onCreateWorkspace}
-          className="p-1.5 hover:bg-surface-hover rounded-md border border-border hover:border-primary/50 text-muted hover:text-primary transition-all active:scale-95"
-          title="Create New Workspace"
-        >
-          <Plus size={16} />
-        </button>
 
         <div className="h-5 w-px bg-border/50 mx-1" />
 
@@ -207,36 +199,34 @@ export function TopBar({
         />
       </div>
 
-      <div className="flex-1 max-w-xl px-4 md:px-8">
+      <div className="flex-1 max-w-md px-4 md:px-8">
         <div className="relative group">
           <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
-            <Search size={16} className="text-muted group-focus-within:text-primary transition-colors" />
+            <Search size={14} className="text-muted group-focus-within:text-primary transition-colors" />
           </div>
           <input
             id="global-search-input"
             type="text"
             placeholder="Search API..."
-            className="w-full bg-background border border-border text-[13px] rounded-full pl-11 pr-16 py-1.5 text-gray-200 placeholder-muted/50 focus:outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/5 transition-all font-medium"
+            className="w-full bg-surface/50 border border-border text-[12px] rounded-full pl-10 pr-16 py-1.5 text-gray-200 placeholder-muted/40 focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all font-medium"
           />
           <div className="absolute inset-y-0 right-0 hidden md:flex items-center pr-3 pointer-events-none">
-            <span className="text-[10px] font-black font-mono text-muted/60 bg-surface/80 px-2 py-0.5 rounded border border-border">⌘ K</span>
+            <span className="text-[9px] font-black font-mono text-muted/40 bg-surface/80 px-1.5 py-0.5 rounded border border-border/50">⌘ K</span>
           </div>
         </div>
       </div>
 
-      <div className="flex items-center space-x-4 text-sm">
-        <div className="flex items-center space-x-2 bg-method-get/10 border border-method-get/20 px-2 py-1 md:px-3 md:py-1.5 rounded-full">
-          <span className="w-2 h-2 rounded-full bg-method-get shadow-[0_0_8px_rgba(12,187,82,0.4)] animate-pulse"></span>
-          <span className="text-method-get font-black text-[11px] uppercase tracking-widest hidden lg:inline">Connect: Online</span>
-        </div>
-
+      <div className="flex items-center space-x-3 text-sm">
         <div className="relative" ref={peersRef}>
           <div
             onClick={() => setIsPeersOpen(!isPeersOpen)}
-            className="flex items-center space-x-2 text-muted hover:text-gray-100 cursor-pointer transition-colors group px-2 py-1 rounded-md hover:bg-surface-hover"
+            className="flex items-center space-x-2 text-muted hover:text-gray-100 cursor-pointer transition-colors group px-2 py-1.5 rounded-md hover:bg-surface-hover border border-transparent hover:border-border/50"
             title="Online Peers"
           >
-            <Users size={18} className={`${peersCount > 0 ? "text-primary" : "text-muted"} group-hover:text-primary transition-colors`} />
+            <div className="relative">
+              <Users size={18} className={`${peersCount > 0 ? "text-primary" : "text-muted"} group-hover:text-primary transition-colors`} />
+              <div className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border-2 border-surface bg-method-get shadow-[0_0_8px_rgba(12,187,82,0.4)] animate-pulse`}></div>
+            </div>
             <span className="text-[13px] font-bold">{peersCount}</span>
           </div>
 
@@ -320,33 +310,27 @@ export function TopBar({
           )}
         </div>
 
-        <div className="flex items-center space-x-2 text-muted hover:text-gray-100 cursor-pointer transition-colors group">
-          <Activity size={18} className="group-hover:text-primary transition-colors" />
+        <div className="w-8 h-8 rounded-full bg-surface-hover border border-border flex items-center justify-center cursor-pointer hover:border-primary hover:bg-primary/5 transition-all group/user overflow-hidden">
+          <User size={16} className="text-muted group-hover/user:text-primary transition-colors" />
         </div>
 
-        <div className="h-4 w-px bg-border"></div>
+        <div className="flex items-center space-x-1.5 bg-surface-hover/30 p-1 rounded-lg border border-border/50">
+          <div onClick={onOpenShortcuts} className="p-1.5 text-muted hover:text-primary cursor-pointer transition-all hover:scale-105 active:scale-95" title="Keyboard Shortcuts (?)">
+            <Keyboard size={18} />
+          </div>
 
-        <div className="w-8 h-8 rounded-full bg-surface-hover border border-border flex items-center justify-center cursor-pointer hover:border-primary transition-all active:scale-90">
-          <User size={16} className="text-gray-400" />
+          <div onClick={onOpenGlobals} className="p-1.5 text-muted hover:text-primary cursor-pointer transition-all hover:scale-105 active:scale-95" title="Global Variables">
+            <Globe size={18} />
+          </div>
+
+          <div 
+            onClick={onOpenSettings}
+            className="p-1.5 text-muted hover:text-primary cursor-pointer transition-all hover:rotate-45 active:scale-95" 
+            title="Settings"
+          >
+            <Settings size={18} />
+          </div>
         </div>
-
-        <div onClick={onOpenShortcuts} className="text-muted hover:text-primary cursor-pointer transition-all hover:scale-110 active:scale-90" title="Keyboard Shortcuts (?)">
-          <Keyboard size={20} />
-        </div>
-
-        <div onClick={onOpenGlobals} className="text-muted hover:text-primary cursor-pointer transition-all hover:scale-110 active:scale-90" title="Global Variables">
-          <Globe size={20} />
-        </div>
-
-        <div 
-          onClick={onOpenSettings}
-          className="text-muted hover:text-primary cursor-pointer transition-all hover:rotate-45 active:scale-90" 
-          title="Settings"
-        >
-          <Settings size={20} />
-        </div>
-
-        <div className="h-4 w-px bg-border"></div>
 
         <button
           onClick={onToggleInspector}

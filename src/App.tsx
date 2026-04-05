@@ -31,10 +31,10 @@ import type {
 import { defaultAuthConfig } from "./types";
 import { CollectionRunnerModal, type RunnerConfig } from "./components/CollectionRunnerModal";
 import {
-  emptyKeyValueRow,
   generateId,
   headerRowsToObject,
   parseHeadersToRows,
+  parseParamsToRows,
   parseFormDataToRows,
   resolveVariables,
   resolveAuthVariables,
@@ -881,7 +881,7 @@ function App() {
       url: request.url || "",
       body: request.body || "",
       headers: parseHeadersToRows(request.headers),
-      params: [emptyKeyValueRow()], // Initialize or parse params if added later
+      params: parseParamsToRows(request.params),
       isDirty: false,
       preRequestScript: request.pre_request_script || null,
       postRequestScript: request.post_request_script || null,
@@ -1400,6 +1400,7 @@ function App() {
       const formData = typeof payload.form_data === "string" ? payload.form_data : null;
       const binaryFilePath = typeof payload.binary_file_path === "string" ? payload.binary_file_path : null;
       const auth = typeof payload.auth === "string" ? payload.auth : JSON.stringify(defaultAuthConfig);
+      const params = normalizeHeadersForStorage(payload.params); // Reuse same normalization logic
 
       const headers = normalizeHeadersForStorage(payload.headers);
       const body = normalizeBodyForStorage(payload.body);
@@ -1427,6 +1428,7 @@ function App() {
         binaryFilePath,
         binary_file_path: binaryFilePath,
         auth,
+        params,
       });
       setRequestsByCollection((prev) => {
         const current = prev[upserted.collection_id] || [];
@@ -1452,9 +1454,11 @@ function App() {
             url: upserted.url,
             body: upserted.body || "",
             headers: parseHeadersToRows(upserted.headers),
+            params: parseParamsToRows(upserted.params),
             bodyType: (upserted.body_type as any) || "raw",
             formData: parseFormDataToRows(upserted.form_data),
             binaryFilePath: upserted.binary_file_path || null,
+            auth: upserted.auth ? JSON.parse(upserted.auth) : tab.auth,
           };
         }
         return tab;
@@ -1584,7 +1588,9 @@ function App() {
         : "GET",
       url: item.url,
       headers: normalizeHeadersForStorage(item.headers),
+      params: normalizeHeadersForStorage(item.params),
       body: normalizeBodyForStorage(item.body),
+      auth: typeof item.auth === "string" ? item.auth : JSON.stringify(item.auth || defaultAuthConfig),
     };
   }
 
@@ -2457,6 +2463,8 @@ function App() {
               url: request.url,
               headers: request.headers,
               body: request.body,
+              params: request.params,
+              auth: request.auth,
             });
             createdRequests.push(created);
             createdCount += 1;
@@ -2544,6 +2552,8 @@ function App() {
           url: request.url,
           headers: request.headers,
           body: request.body,
+          params: request.params,
+          auth: request.auth,
         });
         createdRequests.push(lastCreated);
       }
@@ -2811,19 +2821,20 @@ function App() {
 
     setIsSavingRequest(true);
     try {
-      const headers = headerRowsToObject(activeTab.headers);
       const updated = await invoke<StoredRequest>("update_request", {
         id: activeTab.requestId,
         name: activeTab.name || "Untitled Request",
         method: activeTab.method,
         url: activeTab.url,
-        headers: Object.keys(headers).length > 0 ? JSON.stringify(headers) : null,
+        headers: activeTab.headers.length > 0 ? JSON.stringify(activeTab.headers) : null,
+        params: activeTab.params.length > 0 ? JSON.stringify(activeTab.params) : null,
         body: activeTab.body || null,
         pre_request_script: activeTab.preRequestScript || null,
         post_request_script: activeTab.postRequestScript || null,
         body_type: activeTab.bodyType,
         form_data: JSON.stringify(activeTab.formData.filter(row => row.key.trim() || row.value.trim())),
         binary_file_path: activeTab.binaryFilePath,
+        auth: JSON.stringify(activeTab.auth),
       });
 
       setRequestsByCollection((prev) => {
@@ -2843,6 +2854,7 @@ function App() {
         url: updated.url,
         body: updated.body || "",
         headers: parseHeadersToRows(updated.headers),
+        params: parseParamsToRows(updated.params),
         bodyType: (updated.body_type as any) || "raw",
         formData: parseFormDataToRows(updated.form_data),
         binaryFilePath: updated.binary_file_path || null,
