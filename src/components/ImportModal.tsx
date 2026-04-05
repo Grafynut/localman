@@ -1,15 +1,17 @@
 import { useState, useEffect } from "react";
-import { X, Upload, Terminal, FileJson, AlertCircle, CheckCircle2 } from "lucide-react";
+import { X, Upload, Terminal, FileJson, AlertCircle, CheckCircle2, Globe } from "lucide-react";
+import yaml from "js-yaml";
 
 type Props = {
   isOpen: boolean;
   onClose: () => void;
   onImportCurl: (curl: string) => void;
   onImportPostman: (json: any) => void;
+  onImportOpenAPI: (spec: any) => void;
 };
 
-export function ImportModal({ isOpen, onClose, onImportCurl, onImportPostman }: Props) {
-  const [activeTab, setActiveTab] = useState<"curl" | "postman">("curl");
+export function ImportModal({ isOpen, onClose, onImportCurl, onImportPostman, onImportOpenAPI }: Props) {
+  const [activeTab, setActiveTab] = useState<"curl" | "postman" | "openapi">("curl");
   const [inputText, setInputText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -46,7 +48,7 @@ export function ImportModal({ isOpen, onClose, onImportCurl, onImportPostman }: 
         onImportCurl(inputText.trim());
         setSuccess(true);
         setTimeout(onClose, 800);
-      } else {
+      } else if (activeTab === "postman") {
         const json = JSON.parse(inputText);
         if (!json.info || !json.item) {
           setError("Invalid Postman Collection format (v2.1 expected).");
@@ -54,6 +56,28 @@ export function ImportModal({ isOpen, onClose, onImportCurl, onImportPostman }: 
         }
         setIsImporting(true);
         onImportPostman(json);
+        setSuccess(true);
+        setTimeout(onClose, 800);
+      } else {
+        // OpenAPI
+        let spec: any;
+        try {
+          spec = JSON.parse(inputText);
+        } catch {
+          try {
+            spec = yaml.load(inputText);
+          } catch (e) {
+            setError("Invalid OpenAPI format (JSON or YAML expected).");
+            return;
+          }
+        }
+
+        if (!spec.openapi && !spec.swagger) {
+          setError("Invalid OpenAPI/Swagger specification.");
+          return;
+        }
+        setIsImporting(true);
+        onImportOpenAPI(spec);
         setSuccess(true);
         setTimeout(onClose, 800);
       }
@@ -117,6 +141,15 @@ export function ImportModal({ isOpen, onClose, onImportCurl, onImportPostman }: 
             <FileJson size={14} />
             <span>Postman Collection</span>
           </button>
+          <button
+            onClick={() => setActiveTab("openapi")}
+            className={`flex-1 flex items-center justify-center space-x-2 py-3 text-[12px] font-bold transition-all border-b-2 ${
+              activeTab === "openapi" ? "border-primary text-primary" : "border-transparent text-muted hover:text-gray-300"
+            }`}
+          >
+            <Globe size={14} />
+            <span>OpenAPI / Swagger</span>
+          </button>
         </div>
 
         <div className="p-6 flex-1 flex flex-col space-y-4">
@@ -127,7 +160,11 @@ export function ImportModal({ isOpen, onClose, onImportCurl, onImportPostman }: 
             <textarea
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder={activeTab === "curl" ? "curl -X POST https://api.example.com..." : '{\n  "info": { "name": "My Collection", ... },\n  "item": [ ... ]\n}'}
+              placeholder={
+                activeTab === "curl" ? "curl -X POST https://api.example.com..." : 
+                activeTab === "postman" ? '{\n  "info": { "name": "My Collection", ... },\n  "item": [ ... ]\n}' :
+                'openapi: 3.0.0\ninfo:\n  title: My API\n...'
+              }
               className="flex-1 w-full bg-[#1a1a1a] border border-border rounded-lg px-4 py-3 text-[13px] font-mono text-gray-300 focus:outline-none focus:border-primary/50 transition-all resize-none"
             />
           </div>

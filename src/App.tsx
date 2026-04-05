@@ -41,6 +41,7 @@ import {
   formDataRowsToEntries,
   parseCurl,
   parsePostman,
+  parseOpenAPI,
 } from "./utils";
 import { EnvironmentManager } from "./components/EnvironmentManager";
 import { ImportModal } from "./components/ImportModal";
@@ -48,12 +49,14 @@ import { HistoryPanel } from "./components/HistoryPanel";
 import { CodeSnippetModal } from "./components/CodeSnippetModal";
 import { GlobalVariablesModal } from "./components/GlobalVariablesModal";
 import { ShortcutsModal } from "./components/ShortcutsModal";
+import { GlobalSearch, type SearchItem } from "./components/GlobalSearch";
 import { v4 as uuidv4 } from "uuid";
 import "./App.css";
 import { invoke } from "@tauri-apps/api/core";
 import { executeScript } from "./utils/sandbox";
 import { Play } from "lucide-react";
 import { SettingsModal, type ThemeId } from "./components/SettingsModal";
+import { CookieManagerModal } from "./components/CookieManagerModal";
 
 function App() {
   const LOCAL_USER_ID = "local_user_1";
@@ -85,6 +88,7 @@ function App() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isCodeSnippetOpen, setIsCodeSnippetOpen] = useState(false);
   const [isGlobalsModalOpen, setIsGlobalsModalOpen] = useState(false);
 
@@ -145,6 +149,52 @@ function App() {
   const [runnerReport, setRunnerReport] = useState<RunnerReport | null>(null);
   const runnerStopRef = useRef(false);
   const runnerPauseRef = useRef(false);
+  const [isCookieManagerOpen, setIsCookieManagerOpen] = useState(false);
+  const [cookies, setCookies] = useState<Record<string, Record<string, string>>>(() => {
+    const saved = localStorage.getItem("localman.cookies");
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  useEffect(() => {
+    localStorage.setItem("localman.cookies", JSON.stringify(cookies));
+  }, [cookies]);
+
+  const getCookiesForDomain = (url: string) => {
+    try {
+      const { hostname } = new URL(url);
+      const domainCookies = cookies[hostname] || {};
+      if (Object.keys(domainCookies).length === 0) return null;
+      return Object.entries(domainCookies)
+        .map(([name, value]) => `${name}=${value}`)
+        .join("; ");
+    } catch {
+      return null;
+    }
+  };
+
+  const updateCookiesFromHeaders = (url: string, headers: Record<string, string>) => {
+    try {
+      const { hostname } = new URL(url);
+      const setCookieHeader = headers["Set-Cookie"] || headers["set-cookie"];
+      if (!setCookieHeader) return;
+
+      const newCookies = { ...cookies };
+      if (!newCookies[hostname]) newCookies[hostname] = {};
+
+      // Set-Cookie can be a single string or an array (comma-separated in some fetch impls)
+      const parts = String(setCookieHeader).split(/,(?=[^;]+=[^;]+)/);
+      parts.forEach(part => {
+        const cookiePart = part.split(";")[0].trim();
+        const [name, ...valueParts] = cookiePart.split("=");
+        if (name && valueParts.length > 0) {
+          newCookies[hostname][name.trim()] = valueParts.join("=").trim();
+        }
+      });
+      setCookies(newCookies);
+    } catch (e) {
+      console.warn("Failed to parse cookies", e);
+    }
+  };
   const activeCollectionIdRef = useRef<string | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
 
@@ -626,8 +676,25 @@ function App() {
     let currentEnvVars = startEnv ? JSON.parse(startEnv.variables) : {};
     let currentGlobalVars = { ...globals };
 
-    for (let i = 0; i < config.iterations; i++) {
-      for (const req of runRequests) {
+    const totalIterations = config.iterationData && config.iterationData.length > 0 ? config.iterationData.length : config.iterations;
+
+    for (let i = 0; i < totalIterations; i++) {
+      const iterationData = config.iterationData?.[i] || null;
+      
+      let j = 0;
+      let requestsExecutedInIteration = 0;
+      const MAX_REQUESTS_PER_ITERATION = 1000; // Safety against infinite loops
+
+      while (j < runRequests.length) {
+        const req = runRequests[j];
+        requestsExecutedInIteration++;
+        let nextRequestHandled = false;
+
+        if (requestsExecutedInIteration > MAX_REQUESTS_PER_ITERATION) {
+          console.error("Max requests per iteration reached. Possible infinite loop in setNextRequest.");
+          break;
+        }
+
         if (runnerStopRef.current) break;
         while (runnerPauseRef.current) {
           await new Promise(r => setTimeout(r, 100));
@@ -644,7 +711,43 @@ function App() {
           });
 
           let finalUrl = resolveVariables(req.url, resolutionContext);
+
+          // Auto-inject Cookies
+          const cookieHeader = getCookiesForDomain(finalUrl);
+          if (cookieHeader) {
+            resolvedHeaders["Cookie"] = cookieHeader;
+          }
+
+          let visualizerHtml: string | null = null;
+
+          // Resolve body based on type
+          let finalBodyType = req.body_type || "none";
           let resolvedBody = req.body ? resolveVariables(req.body, resolutionContext) : null;
+
+          if (finalBodyType === "graphql") {
+            try {
+              const parsed = JSON.parse(req.body || "{}");
+              const query = parsed.query || "";
+              const variables = parsed.variables || "";
+              let parsedVars = {};
+              try {
+                parsedVars = variables ? JSON.parse(resolveVariables(variables, resolutionContext)) : {};
+              } catch (e) {
+                console.warn("Invalid GraphQL variables in runner", e);
+              }
+              resolvedBody = JSON.stringify({
+                query: resolveVariables(query, resolutionContext),
+                variables: parsedVars
+              });
+              finalBodyType = "raw"; // Map to raw for backend
+              if (!Object.keys(resolvedHeaders).some(k => k.toLowerCase() === 'content-type')) {
+                resolvedHeaders['Content-Type'] = 'application/json';
+              }
+            } catch (e) {
+              console.error("Failed to format GraphQL payload in runner", e);
+            }
+          }
+
 
           // Pre-request Script
           if (req.pre_request_script) {
@@ -656,7 +759,8 @@ function App() {
                 method: req.method,
                 headers: resolvedHeaders,
                 body: resolvedBody,
-              }
+              },
+              iterationData: iterationData || undefined
             };
             const preResult = executeScript(req.pre_request_script, preContext);
             currentEnvVars = { ...preResult.environmentMutations };
@@ -664,6 +768,11 @@ function App() {
             finalUrl = preResult.requestMutations.url;
             Object.assign(resolvedHeaders, preResult.requestMutations.headers);
             resolvedBody = preResult.requestMutations.body;
+
+            if (preResult.skipRequest) {
+              j++;
+              continue;
+            }
           }
 
           const res = await invoke<HttpResponseResult>("execute_request", {
@@ -672,16 +781,19 @@ function App() {
               url: finalUrl,
               headers: resolvedHeaders,
               body: resolvedBody,
-              body_type: req.body_type || "none",
+              body_type: finalBodyType,
               form_data: req.form_data ? JSON.parse(req.form_data).map((entry: any) => ({
                 ...entry,
                 key: resolveVariables(entry.key, resolutionContext),
                 value: entry.type === "text" ? resolveVariables(entry.value, resolutionContext) : entry.value
               })) : [],
-               binary_file_path: req.binary_file_path ? resolveVariables(req.binary_file_path, resolutionContext) : null,
-               auth: req.auth ? resolveAuthVariables(JSON.parse(req.auth), resolutionContext) : null,
-             }
-           });
+              binary_file_path: req.binary_file_path ? resolveVariables(req.binary_file_path, resolutionContext) : null,
+              auth: req.auth ? resolveAuthVariables(JSON.parse(req.auth), resolutionContext) : null,
+            }
+          });
+
+          // Auto-capture Cookies
+          updateCookiesFromHeaders(finalUrl, res.headers);
 
           let tests: any[] = [];
           let passed = true;
@@ -699,13 +811,42 @@ function App() {
                 status: res.status,
                 body: res.body,
                 headers: res.headers || {},
-              }
+              },
+              iterationData: iterationData || undefined
             };
             const postResult = executeScript(req.post_request_script, postContext);
             tests = postResult.testResults || [];
             passed = tests.every(t => t.passed);
+            visualizerHtml = postResult.visualizerHtml || null;
             currentEnvVars = { ...postResult.environmentMutations };
             currentGlobalVars = { ...postResult.globalMutations };
+
+            // Handle setNextRequest
+            if (postResult.nextRequest !== undefined) {
+              if (postResult.nextRequest === null) {
+                j = runRequests.length; // Stop the iteration
+                nextRequestHandled = true;
+              } else {
+                const targetIdOrName = postResult.nextRequest;
+                const nextIndex = runRequests.findIndex(r => r.id === targetIdOrName || r.name === targetIdOrName);
+                if (nextIndex !== -1) {
+                  j = nextIndex;
+                  nextRequestHandled = true;
+                } else {
+                  console.warn(`setNextRequest: Request not found: ${targetIdOrName}`);
+                  j++;
+                }
+              }
+            } else {
+              j++;
+            }
+          } else {
+            j++;
+          }
+
+          if (nextRequestHandled) {
+            // If we manually jumped, skip the default increment
+            // Actually 'j' is already set to the target or stopped.
           }
 
           // Update app state for visibility
@@ -730,7 +871,8 @@ function App() {
             status: res.status,
             time_ms: res.time_ms,
             testResults: tests,
-            passed: passed
+            passed: passed,
+            visualizerHtml: visualizerHtml
           };
 
           results.push(result);
@@ -804,17 +946,22 @@ function App() {
         setIsEnvManagerOpen(true);
       }
 
+      // Ctrl/Cmd + Shift + C: Toggle Cookie Manager
+      if (isMod && e.shiftKey && e.key === "C") {
+        e.preventDefault();
+        setIsCookieManagerOpen(prev => !prev);
+      }
+
       // Ctrl/Cmd + H: Toggle History
       if (isMod && e.key === "h") {
         e.preventDefault();
         setIsHistoryOpen(prev => !prev);
       }
 
-      // Ctrl/Cmd + K: Focus Search
+      // Ctrl/Cmd + K: Open Global Search
       if (isMod && e.key === "k") {
         e.preventDefault();
-        const searchInput = document.getElementById("global-search-input");
-        searchInput?.focus();
+        setIsSearchOpen(true);
       }
 
       // Ctrl/Cmd + \ or Ctrl+[: Toggle Left Sidebar
@@ -889,6 +1036,7 @@ function App() {
       formData: parseFormDataToRows(request.form_data),
       binaryFilePath: request.binary_file_path || null,
       auth: request.auth ? JSON.parse(request.auth) : defaultAuthConfig,
+      description: request.description || null,
     };
 
     setOpenTabs(prev => [...prev, newTab]);
@@ -897,6 +1045,24 @@ function App() {
 
   function handleTabSelect(tabId: string) {
     setActiveTabId(tabId);
+  }
+
+  function handleSearchSelect(item: SearchItem) {
+    if (item.type === "request") {
+      const colId = item.originalItem.collection_id;
+      const colRequests = requestsByCollection[colId] || [];
+      const request = colRequests.find(r => r.id === item.id);
+      if (request) {
+        applyStoredRequest(request);
+      }
+    } else if (item.type === "folder") {
+      const colId = item.originalItem.collection_id;
+      setExpandedCollections(prev => ({ ...prev, [colId]: true }));
+      setExpandedFolders(prev => ({ ...prev, [item.id]: true }));
+      setActiveCollectionId(colId);
+    } else if (item.type === "environment") {
+      setActiveEnvId(item.id);
+    }
   }
 
   function handleTabClose(tabId: string, e: React.MouseEvent) {
@@ -973,6 +1139,7 @@ function App() {
         method: parsed.method,
         url: parsed.url,
         body: parsed.body,
+        description: null,
         headers: JSON.stringify(headerRowsToObject(parsed.headers)),
         params: JSON.stringify({}),
         position: 0,
@@ -990,6 +1157,7 @@ function App() {
         url: newRequest.url,
         headers: newRequest.headers,
         body: newRequest.body,
+        description: newRequest.description,
         params: newRequest.params,
         position: 0,
         auth: newRequest.auth,
@@ -1037,6 +1205,7 @@ function App() {
             collectionId: folder.collection_id,
             collection_id: folder.collection_id,
             name: folder.name,
+            description: folder.description,
             position: 0,
           });
           void broadcastSyncEvent("Create", "Folder", folder.id, folder);
@@ -1056,6 +1225,7 @@ function App() {
             url: req.url,
             headers: req.headers,
             body: req.body,
+            description: req.description,
             params: req.params,
             position: 0,
             auth: req.auth || JSON.stringify(defaultAuthConfig),
@@ -1072,6 +1242,51 @@ function App() {
       setIsImportModalOpen(false);
     } catch (error) {
       console.error("Postman import error:", error);
+      showToast({ kind: "error", title: "Import Failed", description: String(error) });
+    }
+  }
+
+  async function handleImportOpenAPI(spec: any) {
+    try {
+      const { collections: newCols, requests: newReqs } = parseOpenAPI(spec);
+
+      for (const col of newCols) {
+        const createdCol = await invoke<Collection>("create_collection", {
+          id: col.id,
+          workspaceId: activeWorkspaceId,
+          name: col.name,
+          ownerId: LOCAL_USER_ID,
+          position: collections.length,
+        });
+        setCollections((prev) => [...prev, createdCol]);
+        if (collections.length === 0 || !activeCollectionId) {
+          setActiveCollectionId(createdCol.id);
+        }
+        void broadcastSyncEvent("Create", "Collection", createdCol.id, createdCol);
+
+        // OpenAPI utility doesn't support nested folders currently, so we skip for now
+        
+        // Import requests for this collection
+        const colReqs = newReqs.filter(r => r.collection_id === col.id);
+        for (const req of colReqs) {
+          await invoke("create_request", {
+            ...req,
+            collectionId: req.collection_id,
+            collection_id: req.collection_id,
+            description: req.description,
+          });
+          void broadcastSyncEvent("Create", "Request", req.id, req);
+        }
+
+        // Refresh local state for this collection
+        await fetchRequests(createdCol.id);
+        setExpandedCollections(prev => ({ ...prev, [createdCol.id]: true }));
+      }
+
+      showToast({ kind: "success", title: "OpenAPI Import Complete", description: `Imported ${newCols.length} collections` });
+      setIsImportModalOpen(false);
+    } catch (error) {
+      console.error("OpenAPI import error:", error);
       showToast({ kind: "error", title: "Import Failed", description: String(error) });
     }
   }
@@ -1311,12 +1526,14 @@ function App() {
 
       const name = typeof payload.name === "string" ? payload.name : "Shared Folder";
       const position = typeof payload.position === "number" ? payload.position : 0;
+      const description = typeof payload.description === "string" ? payload.description : null;
 
       const upserted = await invoke<Folder>("upsert_folder", {
         id: event.entity_id,
         collectionId,
         collection_id: collectionId,
         name,
+        description,
         position,
       });
 
@@ -1369,11 +1586,13 @@ function App() {
         return;
       }
       if (!collectionsRef.current.some((collection) => collection.id === collectionId)) {
+        const description = typeof payload.collection_description === "string" ? payload.collection_description : null;
         const placeholderCollection = await invoke<Collection>("upsert_collection", {
           id: collectionId,
           workspaceId: activeWorkspaceId,
           name: `Shared Collection ${collectionId.slice(0, 4)}`,
           ownerId: LOCAL_USER_ID,
+          description,
           position: collections.length,
         });
         setCollections((prev) => {
@@ -1401,6 +1620,7 @@ function App() {
       const binaryFilePath = typeof payload.binary_file_path === "string" ? payload.binary_file_path : null;
       const auth = typeof payload.auth === "string" ? payload.auth : JSON.stringify(defaultAuthConfig);
       const params = normalizeHeadersForStorage(payload.params); // Reuse same normalization logic
+      const description = typeof payload.description === "string" ? payload.description : null;
 
       const headers = normalizeHeadersForStorage(payload.headers);
       const body = normalizeBodyForStorage(payload.body);
@@ -1429,6 +1649,7 @@ function App() {
         binary_file_path: binaryFilePath,
         auth,
         params,
+        description,
       });
       setRequestsByCollection((prev) => {
         const current = prev[upserted.collection_id] || [];
@@ -1459,6 +1680,7 @@ function App() {
             formData: parseFormDataToRows(upserted.form_data),
             binaryFilePath: upserted.binary_file_path || null,
             auth: upserted.auth ? JSON.parse(upserted.auth) : tab.auth,
+            description: upserted.description || null,
           };
         }
         return tab;
@@ -1591,6 +1813,7 @@ function App() {
       params: normalizeHeadersForStorage(item.params),
       body: normalizeBodyForStorage(item.body),
       auth: typeof item.auth === "string" ? item.auth : JSON.stringify(item.auth || defaultAuthConfig),
+      description: typeof item.description === "string" ? item.description : null,
     };
   }
 
@@ -2442,6 +2665,7 @@ function App() {
             workspaceId: activeWorkspaceId,
             name: name.trim(),
             ownerId: LOCAL_USER_ID,
+            description: sourceCollection.description,
             position: collections.length,
           });
 
@@ -2463,6 +2687,7 @@ function App() {
               url: request.url,
               headers: request.headers,
               body: request.body,
+              description: request.description,
               params: request.params,
               auth: request.auth,
             });
@@ -2552,6 +2777,7 @@ function App() {
           url: request.url,
           headers: request.headers,
           body: request.body,
+          description: request.description,
           params: request.params,
           auth: request.auth,
         });
@@ -2587,7 +2813,6 @@ function App() {
     }
 
     setIsSending(true);
-    setIsSending(true);
     setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, lastResponse: null, lastRespTab: "Body" } : t));
 
     // Resolve Environments
@@ -2610,6 +2835,12 @@ function App() {
       resolvedHeaders[k] = resolveVariables(v, resolutionContext);
     });
 
+    // Auto-inject Cookies
+    const cookieHeader = getCookiesForDomain(resolveVariables(activeTab.url, resolutionContext));
+    if (cookieHeader) {
+      resolvedHeaders["Cookie"] = cookieHeader;
+    }
+
     let finalUrl = resolveVariables(activeTab.url, resolutionContext);
     if (!finalUrl.startsWith("http")) {
       finalUrl = `https://jsonplaceholder.typicode.com${finalUrl.startsWith("/") ? finalUrl : `/${finalUrl}`}`;
@@ -2628,6 +2859,28 @@ function App() {
     }
 
     let resolvedBody = activeTab.body ? resolveVariables(activeTab.body, resolutionContext) : null;
+
+    // Handle GraphQL Payload Formatting
+    if (activeTab.bodyType === "graphql" && activeTab.body) {
+      try {
+        const { query, variables } = JSON.parse(activeTab.body);
+        let parsedVars = {};
+        try {
+          parsedVars = variables ? JSON.parse(resolveVariables(variables, resolutionContext)) : {};
+        } catch (e) {
+          console.warn("Invalid GraphQL variables", e);
+        }
+        resolvedBody = JSON.stringify({ 
+          query: resolveVariables(query, resolutionContext), 
+          variables: parsedVars 
+        });
+        if (!Object.keys(resolvedHeaders).some(k => k.toLowerCase() === 'content-type')) {
+          resolvedHeaders['Content-Type'] = 'application/json';
+        }
+      } catch (e) {
+        console.error("Failed to format GraphQL payload", e);
+      }
+    }
 
     // Build context for pre-request script
     const preContext = {
@@ -2653,17 +2906,14 @@ function App() {
           title: "Pre-request Script Error",
           description: preResult.error,
         });
-        // Continue execution but warn the user
       }
       envData = { ...preResult.environmentMutations };
       currentGlobals = { ...preResult.globalMutations };
       setGlobals(currentGlobals);
       finalUrl = preResult.requestMutations.url;
-      // update headers and body if mutated
       Object.assign(resolvedHeaders, preResult.requestMutations.headers);
       resolvedBody = preResult.requestMutations.body;
 
-      // Update active environment if variables changed
       if (activeEnvId) {
         const activeEnv = environments.find(e => e.id === activeEnvId);
         if (activeEnv) {
@@ -2678,6 +2928,16 @@ function App() {
           });
         }
       }
+
+      if (preResult.skipRequest) {
+        showToast({
+          kind: "info",
+          title: "Request Skipped",
+          description: "Script directed the runner to skip this request.",
+        });
+        setIsSending(false);
+        return;
+      }
     }
 
     try {
@@ -2687,7 +2947,7 @@ function App() {
           url: finalUrl,
           headers: Object.keys(resolvedHeaders).length > 0 ? resolvedHeaders : null,
           body: activeTab.method === "GET" ? null : resolvedBody,
-          body_type: activeTab.bodyType,
+          body_type: activeTab.bodyType === "graphql" ? "raw" : activeTab.bodyType, // Map graphql to raw JSON for the backend
           form_data: activeTab.bodyType === "form-data" ? activeTab.formData.map(entry => ({
             ...entry,
             key: resolveVariables(entry.key, resolutionContext),
@@ -2698,7 +2958,10 @@ function App() {
         },
       });
 
-      // Execute Tests Script
+      // Auto-capture Cookies
+      updateCookiesFromHeaders(finalUrl, response.headers);
+
+      // Execute Tests Script (Post-request)
       let testResults = undefined;
       let finalResponse = { ...response };
       if (activeTab.postRequestScript) {
@@ -2728,7 +2991,24 @@ function App() {
         }
         testResults = postResult.testResults;
         finalResponse.testResults = testResults;
+        finalResponse.visualizerHtml = postResult.visualizerHtml;
         setGlobals(postResult.globalMutations);
+        
+        // Persist Environment changes from Post-request
+        if (activeEnvId) {
+          const activeEnv = environments.find(e => e.id === activeEnvId);
+          if (activeEnv) {
+            const updatedVariables = JSON.stringify(postResult.environmentMutations);
+            setEnvironments(prev => prev.map(env =>
+              env.id === activeEnvId ? { ...env, variables: updatedVariables } : env
+            ));
+            void invoke("update_environment", {
+              id: activeEnvId,
+              name: activeEnv.name,
+              variables: updatedVariables,
+            });
+          }
+        }
       }
 
       setOpenTabs(prev => prev.map(t => t.id === activeTabId ? {
@@ -2835,6 +3115,7 @@ function App() {
         form_data: JSON.stringify(activeTab.formData.filter(row => row.key.trim() || row.value.trim())),
         binary_file_path: activeTab.binaryFilePath,
         auth: JSON.stringify(activeTab.auth),
+        description: activeTab.description || null,
       });
 
       setRequestsByCollection((prev) => {
@@ -2858,7 +3139,8 @@ function App() {
         bodyType: (updated.body_type as any) || "raw",
         formData: parseFormDataToRows(updated.form_data),
         binaryFilePath: updated.binary_file_path || null,
-        auth: updated.auth ? JSON.parse(updated.auth) : t.auth
+        auth: updated.auth ? JSON.parse(updated.auth) : t.auth,
+        description: updated.description || null,
       } : t));
       void broadcastSyncEvent("Update", "Request", updated.id, updated);
       showToast({
@@ -3059,6 +3341,10 @@ function App() {
         onOpenGlobals={() => setIsGlobalsModalOpen(true)}
         onShareWorkspace={handleShareWorkspace}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSearch={() => setIsSearchOpen(true)}
+        onOpenCode={() => setIsCodeSnippetOpen(true)}
+        onOpenCookies={() => setIsCookieManagerOpen(true)}
+        hasActiveTab={!!activeTabId}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -3287,13 +3573,15 @@ function App() {
                   reqPostRequestScript={activeTab.postRequestScript}
                   setReqPostRequestScript={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, postRequestScript: typeof val === 'function' ? val(t.postRequestScript) : val, isDirty: true } : t))}
                   reqBodyType={activeTab.bodyType}
-                  setReqBodyType={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, bodyType: typeof val === 'function' ? val(t.bodyType) : val, isDirty: true } : t))}
+                  setReqBodyType={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, bodyType: (typeof val === 'function' ? (val as any)(t.bodyType) : val) as TabState["bodyType"], isDirty: true } : t))}
                   reqFormData={activeTab.formData}
                   setReqFormData={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, formData: typeof val === 'function' ? val(t.formData) : val, isDirty: true } : t))}
                   reqBinaryFilePath={activeTab.binaryFilePath}
                   setReqBinaryFilePath={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, binaryFilePath: typeof val === 'function' ? val(t.binaryFilePath) : val, isDirty: true } : t))}
                   reqAuth={activeTab.auth}
                   setReqAuth={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, auth: typeof val === 'function' ? val(t.auth) : val, isDirty: true } : t))}
+                  reqDescription={activeTab.description}
+                  setReqDescription={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, description: typeof val === 'function' ? val(t.description) : val, isDirty: true } : t))}
                 />
 
                 <div
@@ -3378,6 +3666,7 @@ function App() {
         onClose={() => setIsImportModalOpen(false)}
         onImportCurl={handleImportCurl}
         onImportPostman={handleImportPostman}
+        onImportOpenAPI={handleImportOpenAPI}
       />
 
       <HistoryPanel
@@ -3440,6 +3729,21 @@ function App() {
       />
 
       <ToastViewport toasts={toasts} onDismiss={(id: number) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
+      <GlobalSearch 
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        requests={requestsByCollection}
+        folders={foldersByCollection}
+        collections={collections}
+        environments={environments}
+        onSelectItem={handleSearchSelect}
+      />
+      <CookieManagerModal
+        isOpen={isCookieManagerOpen}
+        onClose={() => setIsCookieManagerOpen(false)}
+        cookies={cookies}
+        onUpdateCookies={setCookies}
+      />
     </div>
   );
 }

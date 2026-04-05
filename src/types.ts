@@ -10,6 +10,7 @@ export type Folder = {
   collection_id: string;
   name: string;
   position: number;
+  description?: string | null;
   created_at: string;
 };
 
@@ -19,6 +20,7 @@ export type Collection = {
   name: string;
   owner_id: string;
   position: number;
+  description?: string | null;
   created_at?: string;
 };
 
@@ -40,6 +42,7 @@ export type StoredRequest = {
   form_data?: string | null;
   binary_file_path?: string | null;
   auth?: string | null;
+  description?: string | null;
 };
 
 export type AuthType = "none" | "bearer" | "basic" | "apikey";
@@ -85,10 +88,11 @@ export type TabState = {
   isDirty?: boolean;
   preRequestScript: string | null;
   postRequestScript: string | null;
-  bodyType: "none" | "raw" | "form-data" | "binary";
+  bodyType: "none" | "raw" | "form-data" | "binary" | "graphql";
   formData: FormDataEntry[];
   binaryFilePath: string | null;
   auth: AuthConfig;
+  description: string | null;
   lastResponse?: ResponseState;
   lastRespTab?: ResponseTab;
   wsMessages?: WsMessage[];
@@ -96,7 +100,7 @@ export type TabState = {
 };
 
 export type WorkspaceTab = "Params" | "Headers" | "Body" | "Pre-request" | "Auth" | "Tests" | "Docs";
-export type ResponseTab = "Body" | "Headers" | "Tests";
+export type ResponseTab = "Body" | "Headers" | "Tests" | "Visualize";
 export type BodyViewMode = "pretty" | "raw" | "preview";
 
 export type TestResult = {
@@ -111,6 +115,7 @@ export type HttpResponseResult = {
   body: string;
   time_ms: number;
   testResults?: TestResult[];
+  visualizerHtml?: string | null;
 };
 
 export type HttpErrorResult = {
@@ -120,6 +125,7 @@ export type HttpErrorResult = {
   body: string;
   time_ms: number;
   testResults?: TestResult[];
+  visualizerHtml?: string | null;
 };
 
 export type ResponseState = HttpResponseResult | HttpErrorResult | null;
@@ -190,6 +196,7 @@ export type RunnerResult = {
   time_ms: number;
   testResults: TestResult[];
   passed: boolean;
+  visualizerHtml?: string | null;
   error?: string;
 };
 
@@ -199,5 +206,15 @@ export type RunnerReport = {
   failedRequests: number;
   totalTime: number;
   results: RunnerResult[];
+};
+
+export type Cookie = {
+  name: string;
+  value: string;
+  domain: string;
+  path?: string;
+  expires?: string;
+  httpOnly?: boolean;
+  secure?: boolean;
 };
 

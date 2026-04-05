@@ -11,7 +11,7 @@ type Props = {
   responseBody: string | null;
 };
 
-type Language = "cURL" | "fetch" | "Axios" | "Python" | "Rust" | "Go" | "Java" | "C#" | "PHP" | "Dart" | "Swift" | "Kotlin" | "TypeScript";
+type Language = "cURL" | "fetch" | "Axios" | "TanStack Query" | "tRPC" | "Python" | "Rust" | "Go" | "Java" | "C#" | "PHP" | "Dart" | "Swift" | "Kotlin" | "TypeScript";
 
 function generateCurl(method: string, url: string, headers: Record<string, string>, body: string | null) {
   let curl = `curl -X ${method} "${url}"`;
@@ -256,6 +256,42 @@ function generateKotlin(method: string, url: string, headers: Record<string, str
   return kt;
 }
 
+function generateTanStackQuery(method: string, url: string, headers: Record<string, string>, body: string | null) {
+  const hookName = `use${method.charAt(0).toUpperCase() + method.slice(1).toLowerCase()}Request`;
+  const isMutation = method !== "GET";
+
+  let code = `import { ${isMutation ? "useMutation" : "useQuery"} } from "@tanstack/react-query";\nimport axios from "axios";\n\n`;
+  code += `export const ${hookName} = () => {\n`;
+  
+  if (isMutation) {
+    code += `  return useMutation({\n    mutationFn: async (data: any) => {\n      const response = await axios({\n        method: "${method}",\n        url: "${url}",\n`;
+    if (Object.keys(headers).length > 0) code += `        headers: ${JSON.stringify(headers, null, 10).replace(/\n\s*}/, "\n        }")},\n`;
+    code += `        data: data || ${body ? JSON.stringify(body) : "undefined"},\n      });\n      return response.data;\n    },\n  });\n};`;
+  } else {
+    code += `  return useQuery({\n    queryKey: ["${url}"],\n    queryFn: async () => {\n      const response = await axios({\n        method: "GET",\n        url: "${url}",\n`;
+    if (Object.keys(headers).length > 0) code += `        headers: ${JSON.stringify(headers, null, 10).replace(/\n\s*}/, "\n        }")},\n`;
+    code += `      });\n      return response.data;\n    },\n  });\n};`;
+  }
+  
+  return code;
+}
+
+function generateTRPC(method: string, url: string, _headers: Record<string, string>, _body: string | null) {
+  const procedureName = url.split("/").pop() || "myProcedure";
+  const isMutation = method !== "GET";
+
+  let code = `// Mock tRPC-like structure for the ${method} request\n`;
+  code += `import { initTRPC } from '@trpc/server';\nimport { z } from 'zod';\n\nconst t = initTRPC.create();\n\nconst router = t.router({\n  ${procedureName}: t.procedure\n`;
+  
+  if (isMutation) {
+    code += `    .input(z.object({ /* Add validation schema */ }))\n    .mutation(async ({ input }) => {\n      // Implementation\n      return { /* mocked response */ };\n    }),\n});`;
+  } else {
+    code += `    .input(z.object({ /* Add validation schema */ }))\n    .query(async ({ input }) => {\n      // Implementation\n      return { /* mocked response */ };\n    }),\n});`;
+  }
+  
+  return code;
+}
+
 function jsonToInterface(jsonString: string): string {
   try {
     const obj = JSON.parse(jsonString);
@@ -293,6 +329,9 @@ export function CodeSnippetModal({ isOpen, onClose, method, url, headers, body, 
     switch (activeTab) {
       case "cURL": return generateCurl(method, url, headers, body);
       case "fetch": return generateFetch(method, url, headers, body);
+      case "Axios": return generateAxios(method, url, headers, body);
+      case "TanStack Query": return generateTanStackQuery(method, url, headers, body);
+      case "tRPC": return generateTRPC(method, url, headers, body);
       case "Python": return generatePython(method, url, headers, body);
       case "Rust": return generateRust(method, url, headers, body);
       case "Go": return generateGo(method, url, headers, body);
@@ -320,7 +359,7 @@ export function CodeSnippetModal({ isOpen, onClose, method, url, headers, body, 
     }
   };
 
-  const tabs: Language[] = ["cURL", "fetch", "Axios", "Python", "Rust", "Go", "Java", "C#", "PHP", "Dart", "Swift", "Kotlin", "TypeScript"];
+  const tabs: Language[] = ["cURL", "fetch", "Axios", "TanStack Query", "tRPC", "Python", "Rust", "Go", "Java", "C#", "PHP", "Dart", "Swift", "Kotlin", "TypeScript"];
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">

@@ -151,10 +151,12 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab, hei
       </div>
 
       <div className="flex border-b border-border px-4 shrink-0 bg-surface/10">
-        {(["Body", "Headers", "Tests"] as const).map((tab) => (
+        {(["Body", "Headers", "Tests", "Visualize"] as const)
+          .filter(tab => tab !== "Visualize" || (reqResponse && !("error" in reqResponse) && reqResponse.visualizerHtml))
+          .map((tab) => (
           <button
             key={tab}
-            onClick={() => setRespTab(tab)}
+            onClick={() => setRespTab(tab as any)}
             className={`px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-all relative ${respTab === tab ? "text-primary" : "text-muted hover:text-gray-300"}`}
           >
             {tab === "Body" ? (
@@ -345,6 +347,17 @@ export function ResponsePanel({ reqResponse, isSending, respTab, setRespTab, hei
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {reqResponse && respTab === "Visualize" && !("error" in reqResponse) && (
+          <div className="w-full h-full bg-white overflow-hidden">
+            <iframe 
+              srcDoc={reqResponse.visualizerHtml || ""} 
+              className="w-full h-full border-none" 
+              title="Response Visualizer"
+              sandbox="allow-scripts allow-forms allow-popups allow-modals"
+            />
           </div>
         )}
       </div>

@@ -14,6 +14,7 @@ export type ScriptContext = {
     body: string;
     headers: Record<string, string>;
   };
+  iterationData?: Record<string, any>;
 };
 
 export type ExecutionResult = {
@@ -26,6 +27,9 @@ export type ExecutionResult = {
     body: string | null;
   };
   testResults: TestResult[];
+  visualizerHtml?: string | null;
+  nextRequest?: string | null;
+  skipRequest?: boolean;
   error?: string;
 };
 
@@ -41,6 +45,9 @@ export function executeScript(script: string, context: ScriptContext): Execution
   const globalMutations: Record<string, string> = { ...context.globals };
   const reqMutations = { ...context.request };
   const tests: TestResult[] = [];
+  let visualizerHtml: string | null = null;
+  let nextRequest: string | null = null;
+  let skipRequest = false;
 
   const pm = {
     environment: {
@@ -90,6 +97,30 @@ export function executeScript(script: string, context: ScriptContext): Execution
         tests.push({ name, passed: false, error: err.message || String(err) });
       }
     },
+    visualizer: {
+      set: (template: string, data?: any) => {
+        // Simple template engine: replace {{key}} with data[key]
+        let html = template;
+        if (data && typeof data === 'object') {
+          Object.entries(data).forEach(([key, val]) => {
+            const regex = new RegExp(`{{\\s?${key}\\s?}}`, 'g');
+            html = html.replace(regex, String(val));
+          });
+        }
+        visualizerHtml = html;
+      }
+    },
+    iterationData: {
+      get: (key: string) => context.iterationData?.[key]
+    },
+    execution: {
+      setNextRequest: (idOrName: string | null) => {
+        nextRequest = idOrName;
+      },
+      skipRequest: () => {
+        skipRequest = true;
+      }
+    },
     expect: (actual: any) => ({
       to: {
         equal: (expected: any) => {
@@ -126,6 +157,9 @@ export function executeScript(script: string, context: ScriptContext): Execution
       globalMutations: globalMutations,
       requestMutations: pm.request,
       testResults: tests,
+      visualizerHtml: visualizerHtml,
+      nextRequest: nextRequest,
+      skipRequest: skipRequest,
     };
   } catch (error: any) {
     return {
@@ -133,6 +167,9 @@ export function executeScript(script: string, context: ScriptContext): Execution
       globalMutations: globalMutations,
       requestMutations: pm.request,
       testResults: tests,
+      visualizerHtml: visualizerHtml,
+      nextRequest: nextRequest,
+      skipRequest: skipRequest,
       error: error.message || String(error),
     };
   }

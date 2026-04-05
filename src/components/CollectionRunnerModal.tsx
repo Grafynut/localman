@@ -9,7 +9,12 @@ import {
   Clock, 
   Zap, 
   Settings2,
-  ListRestart
+  ListRestart,
+  ChevronDown,
+  Download,
+  Table,
+  FileText,
+  Upload
 } from "lucide-react";
 import type { StoredRequest, RunnerStatus, RunnerReport, Environment } from "../types";
 import { methodColor } from "../utils";
@@ -34,6 +39,7 @@ export type RunnerConfig = {
   delay: number;
   requestIds: string[];
   environmentId: string | null;
+  iterationData?: Record<string, any>[];
 };
 
 export function CollectionRunnerModal({
@@ -54,6 +60,8 @@ export function CollectionRunnerModal({
   const [delay, setDelay] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [envId, setEnvId] = useState<string | null>(activeEnvId);
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const [iterationData, setIterationData] = useState<any[] | null>(null);
 
   useEffect(() => {
     setSelectedIds(requests.map(r => r.id));
@@ -62,6 +70,19 @@ export function CollectionRunnerModal({
   useEffect(() => {
     setEnvId(activeEnvId);
   }, [activeEnvId]);
+
+  const handleDownloadReport = () => {
+    if (!report) return;
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `localman-report-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   if (!isOpen) return null;
 
@@ -72,11 +93,17 @@ export function CollectionRunnerModal({
   };
 
   const handleRun = () => {
-    onRun({ iterations, delay, requestIds: selectedIds, environmentId: envId });
+    onRun({ 
+      iterations, 
+      delay, 
+      requestIds: selectedIds, 
+      environmentId: envId,
+      iterationData: iterationData || undefined 
+    });
   };
 
   // Progress calculations
-  const totalSteps = selectedIds.length * iterations;
+  const totalSteps = selectedIds.length * (iterationData && iterationData.length > 0 ? iterationData.length : iterations);
   const completedSteps = report?.results.length || 0;
   const progressPercent = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0;
 
@@ -135,6 +162,66 @@ export function CollectionRunnerModal({
                       className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-[14px] font-bold text-gray-200 focus:border-primary/50 focus:ring-4 focus:ring-primary/5 outline-none transition-all"
                     />
                   </div>
+                </div>
+
+                {/* Data File Selector */}
+                <div className="space-y-2">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-muted flex items-center space-x-2">
+                    <Table size={12} />
+                    <span>Iteration Data (JSON)</span>
+                  </label>
+                  <div className="relative group">
+                    <input 
+                      type="file" 
+                      accept=".json"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            try {
+                              const json = JSON.parse(event.target?.result as string);
+                              if (Array.isArray(json)) {
+                                setIterationData(json);
+                              } else {
+                                alert("Data must be a JSON array of objects");
+                              }
+                            } catch (e) {
+                              alert("Invalid JSON file");
+                            }
+                          };
+                          reader.readAsText(file);
+                        }
+                      }}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                    />
+                    <div className="w-full bg-background border border-border rounded-xl px-4 py-2.5 flex items-center justify-between group-hover:border-primary/50 transition-all">
+                      <div className="flex items-center space-x-2">
+                        <FileText size={16} className="text-muted" />
+                        <span className="text-[13px] text-gray-200">
+                          {iterationData ? `${iterationData.length} records loaded` : "Select JSON file..."}
+                        </span>
+                      </div>
+                      {iterationData ? (
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIterationData(null);
+                          }}
+                          className="p-1 hover:bg-surface rounded-md text-muted hover:text-red-400 z-20"
+                        >
+                          <X size={14} />
+                        </button>
+                      ) : (
+                        <Upload size={14} className="text-muted" />
+                      )}
+                    </div>
+                  </div>
+                  {iterationData && (
+                    <p className="text-[10px] text-primary/70 font-bold px-1">
+                      Runner will execute {iterationData.length} iterations (one per record).
+                    </p>
+                  )}
                 </div>
 
                 {/* Env Selector */}
@@ -206,16 +293,53 @@ export function CollectionRunnerModal({
                 {/* Execution Log */}
                 <div className="flex-1 overflow-y-auto rounded-xl border border-border bg-black/20 p-4 space-y-2 font-mono text-[12px]">
                    {report?.results.map((res, i) => (
-                     <div key={i} className="flex items-center space-x-3 py-1 border-b border-white/5 last:border-0 group">
-                        <span className="text-muted/50 w-6 italic">{i+1}</span>
-                        <span className={methodColor(res.method)}>{res.method}</span>
-                        <span className="text-gray-200 flex-1 truncate">{res.name}</span>
-                        <span className={res.status < 400 ? "text-method-get" : "text-method-delete"}>{res.status}</span>
-                        <span className="text-muted italic">{res.time_ms}ms</span>
-                        {res.passed ? (
-                          <CheckCircle2 size={14} className="text-method-get" />
-                        ) : (
-                          <XCircle size={14} className="text-method-delete" />
+                     <div key={i} className="flex flex-col border-b border-white/5 last:border-0">
+                        <div 
+                          onClick={() => setExpandedIndex(expandedIndex === i ? null : i)}
+                          className="flex items-center space-x-3 py-2 cursor-pointer hover:bg-white/5 px-2 rounded-lg transition-colors group"
+                        >
+                          <span className="text-muted/50 w-6 italic text-[10px]">{i+1}</span>
+                          <span className={`${methodColor(res.method)} w-12 font-black text-[10px]`}>{res.method}</span>
+                          <span className="text-gray-200 flex-1 truncate font-bold">{res.name}</span>
+                          <span className={`w-10 text-right ${res.status < 400 ? "text-method-get" : "text-method-delete"}`}>{res.status}</span>
+                          <span className="text-muted italic w-16 text-right">{res.time_ms}ms</span>
+                          <div className="flex items-center justify-center w-6">
+                            {res.passed ? (
+                              <CheckCircle2 size={14} className="text-method-get" />
+                            ) : (
+                              <XCircle size={14} className="text-method-delete" />
+                            )}
+                          </div>
+                          <ChevronDown size={14} className={`text-muted transition-transform ${expandedIndex === i ? "rotate-180" : ""}`} />
+                        </div>
+                        
+                        {expandedIndex === i && (
+                          <div className="pl-12 pr-4 py-3 space-y-2 bg-white/[0.02] border-x border-white/5 animate-in slide-in-from-top-1 duration-200">
+                             {res.error && (
+                               <div className="text-red-400 p-2 bg-red-400/10 rounded border border-red-400/20 text-[11px] mb-2">
+                                 Error: {res.error}
+                               </div>
+                             )}
+                             {res.testResults.length > 0 ? (
+                               <div className="space-y-1.5">
+                                 <p className="text-[10px] text-muted font-black uppercase tracking-tighter mb-1 select-none">Assertions ({res.testResults.filter(t => t.passed).length}/{res.testResults.length})</p>
+                                 {res.testResults.map((test, idx) => (
+                                   <div key={idx} className="flex items-center space-x-2 text-[11px]">
+                                     {test.passed ? (
+                                       <CheckCircle2 size={10} className="text-method-get shrink-0" />
+                                     ) : (
+                                       <XCircle size={10} className="text-method-delete shrink-0" />
+                                     )}
+                                     <span className={test.passed ? "text-gray-300" : "text-red-400"}>{test.name}</span>
+                                     {!test.passed && test.error && <span className="text-red-400/60 italic">— {test.error}</span>}
+                                   </div>
+                                 ))}
+                               </div>
+                             ) : (
+                               <p className="text-[10px] text-muted italic">No assertions defined for this request.</p>
+                             )}
+                             <p className="text-[10px] text-muted/40 font-mono mt-2 truncate underline opacity-50">{res.url}</p>
+                          </div>
                         )}
                      </div>
                    ))}
@@ -233,7 +357,18 @@ export function CollectionRunnerModal({
           {/* Right Sidebar (Report Summary) */}
           <div className="w-72 flex flex-col bg-surface-hover/10 p-6 space-y-8 overflow-y-auto">
              <div className="space-y-4">
-               <h3 className="text-[11px] font-black uppercase tracking-widest text-muted">Run Summary</h3>
+               <div className="flex items-center justify-between">
+                 <h3 className="text-[11px] font-black uppercase tracking-widest text-muted">Run Summary</h3>
+                 {report && (
+                   <button 
+                     onClick={handleDownloadReport}
+                     className="p-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-md transition-colors"
+                     title="Download JSON Report"
+                   >
+                     <Download size={14} />
+                   </button>
+                 )}
+               </div>
                {report ? (
                  <div className="space-y-6">
                     <div className="grid grid-cols-2 gap-4">

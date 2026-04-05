@@ -50,6 +50,30 @@ const SNIPPETS: Snippet[] = [
     name: "Check JSON schema",
     code: 'const schema = {\n  "type": "object",\n  "properties": {\n    "id": { "type": "number" }\n  }\n};\npm.test("JSON Schema is valid", () => {\n  pm.response.to.have.jsonSchema(schema);\n});',
     description: "Validate the JSON response against a schema."
+  },
+  {
+    category: "Response",
+    name: "Visualize as Table",
+    code: 'const template = `\n<table bgcolor="#1e1e1e">\n    <tr bgcolor="#333">\n        <th>Name</th>\n        <th>Email</th>\n    </tr>\n    {{#each response}}\n        <tr>\n            <td>{{name}}</td>\n            <td>{{email}}</td>\n        </tr>\n    {{/each}}\n</table>`;\n\npm.visualizer.set(template, { \n    response: pm.response.json() \n});',
+    description: "Render the response data as an HTML table in the Visualize tab."
+  },
+  {
+    category: "Response",
+    name: "Visualize as Chart",
+    code: 'const template = `\n<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>\n<canvas id="myChart"></canvas>\n<script>\n    const ctx = document.getElementById("myChart");\n    new Chart(ctx, {\n        type: "bar",\n        data: {\n            labels: {{labels}},\n            datasets: [{ label: "Value", data: {{values}} }]\n        }\n    });\n</script>`;\n\npm.visualizer.set(template, {\n    labels: JSON.stringify(["Jan", "Feb", "Mar"]),\n    values: JSON.stringify([10, 20, 30])\n});',
+    description: "Render an interactive bar chart using Chart.js in the Visualize tab."
+  },
+  {
+    category: "Variables",
+    name: "Get iteration data",
+    code: 'const value = pm.iterationData.get("key");\nconsole.log("Current iteration value:", value);',
+    description: "Get a value from the currently uploaded data file (JSON/CSV)."
+  },
+  {
+    category: "Utility",
+    name: "Decode JWT Payload",
+    code: 'const token = pm.response.json().token;\nif (token) {\n    const payload = token.split(".")[1];\n    const decoded = JSON.parse(atob(payload));\n    console.log("JWT Payload:", decoded);\n    pm.environment.set("user_id", decoded.sub);\n}',
+    description: "Extract and decode the payload of a JWT from the response."
   }
 ];
 
@@ -61,8 +85,8 @@ export function ScriptSnippets({ onInsert }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
 
   const filteredSnippets = useMemo(() => {
-    return SNIPPETS.filter(s => 
-      s.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    return SNIPPETS.filter(s =>
+      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       s.description.toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [searchQuery]);
@@ -87,7 +111,7 @@ export function ScriptSnippets({ onInsert }: Props) {
           JS
         </div>
       </div>
-      
+
       <div className="px-3 py-2 border-b border-border/30 bg-background/20 relative group">
         <Search size={12} className="absolute left-5 top-1/2 -translate-y-1/2 text-muted/50 group-focus-within:text-primary transition-colors" />
         <input
@@ -99,7 +123,7 @@ export function ScriptSnippets({ onInsert }: Props) {
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-4 custom-scrollbar bg-background/10">
+      <div className="flex-1 overflow-y-auto min-h-0 p-2 space-y-4 custom-scrollbar bg-background/10">
         {Object.entries(groupedSnippets).length > 0 ? (
           Object.entries(groupedSnippets).map(([category, items]) => (
             <div key={category} className="space-y-1.5">
@@ -134,12 +158,12 @@ export function ScriptSnippets({ onInsert }: Props) {
           ))
         ) : (
           <div className="flex flex-col items-center justify-center py-10 opacity-40">
-             <Search size={24} className="mb-2 text-muted" />
-             <span className="text-xs italic text-muted">No snippets found</span>
+            <Search size={24} className="mb-2 text-muted" />
+            <span className="text-xs italic text-muted">No snippets found</span>
           </div>
         )}
       </div>
-      
+
       <div className="p-3 bg-surface-hover/10 border-t border-border/30">
         <p className="text-[9px] text-muted/50 leading-tight flex items-center gap-2">
           <div className="w-1 h-1 rounded-full bg-primary/40" />

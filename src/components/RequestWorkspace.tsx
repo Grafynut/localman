@@ -14,9 +14,11 @@ import { KeyValueEditor } from "./KeyValueEditor";
 import { FormDataEditor } from "./FormDataEditor";
 import { methodColor } from "../utils";
 import { VariableInput } from "./VariableInput";
+import { GraphQLBody } from "./GraphQLBody";
 import { ScriptSnippets } from "./ScriptSnippets";
 import { ScriptEditor } from "./ScriptEditor";
 import { AuthEditor } from "./AuthEditor";
+import { DocumentationEditor } from "./DocumentationEditor";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { KeyValuePair, WorkspaceTab, Environment, FormDataEntry } from "../types";
 
@@ -31,8 +33,8 @@ type Props = {
   setReqMethod: Dispatch<SetStateAction<string>>;
   reqUrl: string;
   setReqUrl: Dispatch<SetStateAction<string>>;
-  reqBody: string;
-  setReqBody: Dispatch<SetStateAction<string>>;
+  reqBody: string | null;
+  setReqBody: Dispatch<SetStateAction<string | null>>;
   reqParams: KeyValuePair[];
   setReqParams: Dispatch<SetStateAction<KeyValuePair[]>>;
   reqHeaders: KeyValuePair[];
@@ -48,14 +50,16 @@ type Props = {
   setReqPreRequestScript: Dispatch<SetStateAction<string | null>>;
   reqPostRequestScript: string | null;
   setReqPostRequestScript: Dispatch<SetStateAction<string | null>>;
-  reqBodyType: "none" | "raw" | "form-data" | "binary";
-  setReqBodyType: Dispatch<SetStateAction<"none" | "raw" | "form-data" | "binary">>;
+  reqBodyType: "none" | "raw" | "form-data" | "binary" | "graphql";
+  setReqBodyType: Dispatch<SetStateAction<"none" | "raw" | "form-data" | "binary" | "graphql">>;
   reqFormData: FormDataEntry[];
   setReqFormData: Dispatch<SetStateAction<FormDataEntry[]>>;
   reqBinaryFilePath: string | null;
   setReqBinaryFilePath: Dispatch<SetStateAction<string | null>>;
   reqAuth: any;
   setReqAuth: Dispatch<SetStateAction<any>>;
+  reqDescription: string | null;
+  setReqDescription: Dispatch<SetStateAction<string | null>>;
 };
 
 export function RequestWorkspace({
@@ -94,6 +98,8 @@ export function RequestWorkspace({
   setReqBinaryFilePath,
   reqAuth,
   setReqAuth,
+  reqDescription,
+  setReqDescription,
 }: Props) {
   const [isMethodOpen, setIsMethodOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -264,7 +270,7 @@ export function RequestWorkspace({
             ))}
           </div>
 
-          <div className="flex-1 min-h-0 overflow-hidden relative bg-background">
+          <div className="flex-1 min-h-0 overflow-hidden relative bg-background flex flex-col">
             {activeWorkspaceTab === "Headers" && (
               <KeyValueEditor
                 items={reqHeaders}
@@ -288,7 +294,7 @@ export function RequestWorkspace({
               <div className="flex-1 flex flex-col h-full bg-background overflow-hidden font-sans">
                 <div className="flex items-center space-x-4 px-3 py-1.5 border-b border-border bg-surface/30 shrink-0">
                   <div className="flex items-center space-x-1">
-                    {(["none", "raw", "form-data", "binary"] as const).map((type) => (
+                    {(["none", "raw", "graphql", "form-data", "binary"] as const).map((type) => (
                       <button
                         key={type}
                         onClick={() => setReqBodyType(type)}
@@ -318,7 +324,7 @@ export function RequestWorkspace({
                     <div className="flex-1 flex flex-col h-full bg-background overflow-hidden relative">
                        <div className="flex-1 relative bg-background group/editor flex overflow-hidden">
                         <div className="shrink-0 w-12 bg-surface/5 border-r border-border text-right py-4 px-3 text-[12px] text-muted/30 font-mono select-none overflow-hidden">
-                          {reqBody.split("\n").map((_, i) => (
+                          {(reqBody || "").split("\n").map((_, i) => (
                             <div key={i} className="h-[21px] leading-[21px]">
                               {i + 1}
                             </div>
@@ -329,7 +335,7 @@ export function RequestWorkspace({
                             id="req-body-highlight"
                             className="absolute inset-0 p-4 font-mono text-[14px] leading-[21px] pointer-events-none whitespace-pre overflow-hidden"
                           >
-                            {reqBody.split(/(".*?"|[:{}\[\]\s,]+|\d+|true|false|null)/g).map((token, i, arr) => {
+                            {(reqBody || "").split(/(".*?"|[:{}\[\]\s,]+|\d+|true|false|null)/g).map((token, i, arr) => {
                               if (/^".*"$/.test(token)) {
                                 if (arr[i + 1]?.includes(':')) return <span key={i} className="text-[#9CDCFE]">{token}</span>;
                                 return <span key={i} className="text-[#CE9178]">{token}</span>;
@@ -341,7 +347,7 @@ export function RequestWorkspace({
                             })}
                           </div>
                           <VariableInput
-                            value={reqBody}
+                            value={reqBody || ""}
                             onChange={setReqBody}
                             type="textarea"
                             environments={environments}
@@ -361,6 +367,35 @@ export function RequestWorkspace({
                       </div>
                     </div>
                   )}
+
+                  {reqBodyType === "graphql" && (() => {
+                    let query = "";
+                    let variables = "";
+                    try {
+                      const parsed = JSON.parse(reqBody || "{}");
+                      query = parsed.query || "";
+                      variables = parsed.variables || "";
+                    } catch (e) {
+                      // If it's not JSON, we just treat the whole thing as potentially the query
+                      query = reqBody || "";
+                    }
+                    
+                    return (
+                      <GraphQLBody
+                        query={query}
+                        variables={variables}
+                        onQueryChange={(q) => {
+                          setReqBody(JSON.stringify({ query: q, variables }));
+                        }}
+                        onVariablesChange={(v) => {
+                          setReqBody(JSON.stringify({ query, variables: v }));
+                        }}
+                        environments={environments}
+                        activeEnvId={activeEnvId}
+                        globals={globals}
+                      />
+                    );
+                  })()}
 
                   {reqBodyType === "form-data" && (
                     <FormDataEditor
@@ -439,7 +474,7 @@ export function RequestWorkspace({
             )}
 
             {activeWorkspaceTab === "Pre-request" && (
-              <div className="flex-1 flex flex-col bg-background overflow-hidden relative">
+              <div className="flex-1 flex flex-col h-full bg-background overflow-hidden relative">
                 <div className="px-4 py-2 border-b border-border/50 bg-surface/10 flex items-center justify-between shrink-0">
                   <div className="flex items-center space-x-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
@@ -455,7 +490,7 @@ export function RequestWorkspace({
                     placeholder="// Write JavaScript code here. Available API: pm.*"
                     className="flex-1"
                   />
-                  <div className="w-64 border-l border-border bg-surface/5">
+                  <div className="w-64 border-l border-border bg-surface/5 flex flex-col">
                     <ScriptSnippets onInsert={(code) => insertSnippet(code, "pre")} />
                   </div>
                 </div>
@@ -463,7 +498,7 @@ export function RequestWorkspace({
             )}
             
             {activeWorkspaceTab === "Tests" && (
-              <div className="flex-1 flex flex-col bg-background overflow-hidden relative">
+              <div className="flex-1 flex flex-col h-full bg-background overflow-hidden relative">
                 <div className="px-4 py-2 border-b border-border/50 bg-surface/10 flex items-center justify-between shrink-0">
                   <div className="flex items-center space-x-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
@@ -479,7 +514,7 @@ export function RequestWorkspace({
                     placeholder="// Write JavaScript code to validate the response. Available API: pm.*"
                     className="flex-1"
                   />
-                  <div className="w-64 border-l border-border bg-surface/5">
+                  <div className="w-64 border-l border-border bg-surface/5 flex flex-col">
                     <ScriptSnippets onInsert={(code) => insertSnippet(code, "post")} />
                   </div>
                 </div>
@@ -487,22 +522,21 @@ export function RequestWorkspace({
             )}
 
             {activeWorkspaceTab === "Auth" && (
-               <AuthEditor 
-                 auth={reqAuth} 
-                 onChange={setReqAuth} 
-                 environments={environments}
-                 activeEnvId={activeEnvId}
-                 globals={globals}
-               />
+              <AuthEditor 
+                auth={reqAuth} 
+                onChange={setReqAuth} 
+                environments={environments}
+                activeEnvId={activeEnvId}
+                globals={globals}
+              />
             )}
 
-            {["Docs"].includes(activeWorkspaceTab) && (
-              <div className="flex items-center justify-center h-full text-muted text-sm font-mono bg-background/50">
-                <span>
-                  No saved {activeWorkspaceTab.toLowerCase()} data for this
-                  request.
-                </span>
-              </div>
+            {activeWorkspaceTab === "Docs" && (
+              <DocumentationEditor
+                description={reqDescription}
+                onUpdate={setReqDescription}
+                placeholder={`Documentation for ${activeRequestName || 'this request'}...`}
+              />
             )}
           </div>
         </div>

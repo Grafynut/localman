@@ -1,4 +1,5 @@
-import type { BodyViewMode, FormDataEntry, KeyValuePair, AuthConfig } from "./types";
+import type { BodyViewMode, FormDataEntry, KeyValuePair, AuthConfig, Collection, Folder, StoredRequest } from "./types";
+import { defaultAuthConfig } from "./types";
 
 export function generateId() {
   return Math.random().toString(36).substring(2, 9);
@@ -378,6 +379,7 @@ export function parsePostman(json: any) {
             }, {})
           ),
           body: item.request.body?.raw || "",
+          description: item.request.description || item.description || null,
           params: JSON.stringify(
             (item.request.url?.query || []).reduce((acc: any, p: any) => {
               acc[p.key] = p.value;
@@ -392,6 +394,7 @@ export function parsePostman(json: any) {
           id: folderId,
           collection_id: collectionId,
           name: item.name,
+          description: item.description || null,
         });
         processItems(item.item, folderId);
       }
@@ -399,6 +402,53 @@ export function parsePostman(json: any) {
   };
 
   if (json.item) processItems(json.item);
+
+  return { collections, folders, requests };
+}
+export function parseOpenAPI(spec: any) {
+  const collections: Collection[] = [];
+  const folders: Folder[] = [];
+  const requests: StoredRequest[] = [];
+
+  const colId = generateId();
+  collections.push({
+    id: colId,
+    workspace_id: "", // Filled by App.tsx
+    name: spec.info?.title || "Imported OpenAPI",
+    owner_id: "",
+    description: spec.info?.description || null,
+    position: 0,
+  });
+
+  const baseUrl = (spec.servers && spec.servers.length > 0) ? spec.servers[0].url : "";
+
+  for (const [path, pathItem] of Object.entries(spec.paths || {})) {
+    if (!pathItem || typeof pathItem !== "object") continue;
+    
+    for (const [method, operation] of Object.entries(pathItem)) {
+      const lowerMethod = method.toLowerCase();
+      if (["get", "post", "put", "delete", "patch", "options", "head", "trace"].includes(lowerMethod)) {
+        const op = operation as any;
+        const requestId = generateId();
+        
+        requests.push({
+          id: requestId,
+          collection_id: colId,
+          folder_id: null,
+          name: op.summary || op.operationId || `${method.toUpperCase()} ${path}`,
+          method: method.toUpperCase(),
+          url: (baseUrl.endsWith('/') && path.startsWith('/') ? baseUrl.slice(0, -1) : baseUrl) + path,
+          body: null,
+          description: op.description || op.summary || null,
+          headers: JSON.stringify({}),
+          params: JSON.stringify({}),
+          position: requests.length,
+          created_at: new Date().toISOString(),
+          auth: JSON.stringify(defaultAuthConfig),
+        });
+      }
+    }
+  }
 
   return { collections, folders, requests };
 }

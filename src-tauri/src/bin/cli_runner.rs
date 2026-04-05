@@ -52,6 +52,9 @@ struct StoredRequest {
     headers: Option<String>,
     body: Option<String>,
     body_type: Option<String>,
+    form_data: Option<String>, // JSON string
+    binary_file_path: Option<String>,
+    auth: Option<String>, // JSON string
 }
 
 fn resolve_variables(text: &str, context: &HashMap<String, String>) -> String {
@@ -113,13 +116,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  ➡️ Running: {} {} ({})", req.method, req.name, req.url);
             
             let resolved_url = resolve_variables(&req.url, &variables);
-            let resolved_body = req.body.as_ref().map(|b| resolve_variables(b, &variables));
             
             let mut resolved_headers = HashMap::new();
-            if let Some(headers_json) = req.headers {
-                if let Ok(headers) = serde_json::from_str::<HashMap<String, String>>(&headers_json) {
+            if let Some(headers_json) = &req.headers {
+                if let Ok(headers) = serde_json::from_str::<HashMap<String, String>>(headers_json) {
                     for (k, v) in headers {
                         resolved_headers.insert(k, resolve_variables(&v, &variables));
+                    }
+                }
+            }
+            let mut final_body_type = req.body_type.unwrap_or_else(|| "none".to_string());
+            let mut resolved_body = req.body.as_ref().map(|b| resolve_variables(b, &variables));
+
+            if final_body_type == "graphql" {
+                if let Some(body_json) = &req.body {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body_json) {
+                        let query = parsed["query"].as_str().unwrap_or("");
+                        let vars_str = parsed["variables"].as_str().unwrap_or("");
+                        
+                        let mut variables_obj = serde_json::Map::new();
+                        if !vars_str.is_empty() {
+                            let resolved_vars_str = resolve_variables(vars_str, &variables);
+                            if let Ok(vars_json) = serde_json::from_str::<serde_json::Value>(&resolved_vars_str) {
+                                if let Some(obj) = vars_json.as_object() {
+                                    variables_obj = obj.clone();
+                                }
+                            }
+                        }
+
+                        resolved_body = Some(serde_json::json!({
+                            "query": resolve_variables(query, &variables),
+                            "variables": variables_obj
+                        }).to_string());
+                        final_body_type = "raw".to_string();
+                        if !resolved_headers.contains_key("Content-Type") {
+                            resolved_headers.insert("Content-Type".to_string(), "application/json".to_string());
+                        }
                     }
                 }
             }
@@ -129,9 +161,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 url: resolved_url,
                 headers: Some(resolved_headers),
                 body: resolved_body,
-                body_type: req.body_type,
-                form_data: None, // Simplified for CLI first
-                binary_file_path: None,
+                body_type: Some(final_body_type),
+                form_data: req.form_data.and_then(|fd| {
+                    serde_json::from_str(&fd).ok().map(|entries: Vec<serde_json::Value>| {
+                        entries.into_iter().map(|e| {
+                            use localman_lib::http::FormDataEntry;
+                            FormDataEntry {
+                                key: resolve_variables(e["key"].as_str().unwrap_or(""), &variables),
+                                value: if e["type"].as_str().unwrap_or("text") == "text" {
+                                    resolve_variables(e["value"].as_str().unwrap_or(""), &variables)
+                                } else {
+                                    e["value"].as_str().unwrap_or("").to_string()
+                                },
+                                r#type: e["type"].as_str().unwrap_or("text").to_string(),
+                                enabled: e["enabled"].as_bool().unwrap_or(true),
+                            }
+                        }).collect()
+                    })
+                }),
+                binary_file_path: req.binary_file_path.map(|p| resolve_variables(&p, &variables)),
+                auth: req.auth.and_then(|a| serde_json::from_str(&a).ok()),
             };
 
             match execute_request(params).await {

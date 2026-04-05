@@ -46,6 +46,8 @@ pub fn init_db(
             workspace_id TEXT NOT NULL DEFAULT 'default_workspace',
             name TEXT NOT NULL,
             owner_id TEXT NOT NULL,
+            description TEXT,
+            position INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
             FOREIGN KEY(owner_id) REFERENCES users(id)
@@ -55,6 +57,7 @@ pub fn init_db(
             id TEXT PRIMARY KEY,
             collection_id TEXT NOT NULL,
             name TEXT NOT NULL,
+            description TEXT,
             position INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(collection_id) REFERENCES collections(id)
@@ -69,6 +72,7 @@ pub fn init_db(
             url TEXT NOT NULL,
             headers TEXT,
             body TEXT,
+            description TEXT,
             position INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             pre_request_script TEXT,
@@ -203,6 +207,9 @@ pub fn init_db(
     );
 
     // Migration for request_history columns (ignores errors if they already exist, but logs them)
+    let _ = conn.execute("ALTER TABLE collections ADD COLUMN description TEXT", []);
+    let _ = conn.execute("ALTER TABLE folders ADD COLUMN description TEXT", []);
+    let _ = conn.execute("ALTER TABLE requests ADD COLUMN description TEXT", []);
     if let Err(e) = conn.execute("ALTER TABLE request_history ADD COLUMN test_results TEXT", []) {
         println!("Migration notice (test_results): {}", e);
     }
@@ -236,6 +243,7 @@ pub struct Folder {
     pub id: String,
     pub collection_id: String,
     pub name: String,
+    pub description: Option<String>,
     pub position: i32,
     pub created_at: String,
 }
@@ -246,6 +254,7 @@ pub struct Collection {
     pub workspace_id: String,
     pub name: String,
     pub owner_id: String,
+    pub description: Option<String>,
     pub position: i32,
     pub created_at: String,
 }
@@ -260,6 +269,7 @@ pub struct StoredRequest {
     pub url: String,
     pub headers: Option<String>,
     pub body: Option<String>,
+    pub description: Option<String>,
     pub position: i32,
     pub pre_request_script: Option<String>,
     pub post_request_script: Option<String>,
@@ -284,7 +294,7 @@ pub struct Environment {
 fn fetch_collection_by_id(conn: &Connection, id: &str) -> std::result::Result<Collection, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, workspace_id, name, owner_id, position, created_at FROM collections WHERE id = ?1",
+            "SELECT id, workspace_id, name, owner_id, description, position, created_at FROM collections WHERE id = ?1",
         )
         .map_err(|e| e.to_string())?;
     let mut rows = stmt.query([id]).map_err(|e| e.to_string())?;
@@ -294,8 +304,9 @@ fn fetch_collection_by_id(conn: &Connection, id: &str) -> std::result::Result<Co
             workspace_id: row.get(1).unwrap_or_default(),
             name: row.get(2).unwrap_or_default(),
             owner_id: row.get(3).unwrap_or_default(),
-            position: row.get(4).unwrap_or_default(),
-            created_at: row.get(5).unwrap_or_default(),
+            description: row.get(4).ok(),
+            position: row.get(5).unwrap_or_default(),
+            created_at: row.get(6).unwrap_or_default(),
         })
     } else {
         Err("Collection not found".to_string())
@@ -305,7 +316,7 @@ fn fetch_collection_by_id(conn: &Connection, id: &str) -> std::result::Result<Co
 fn fetch_request_by_id(conn: &Connection, id: &str) -> std::result::Result<StoredRequest, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth, params
+            "SELECT id, collection_id, folder_id, name, method, url, headers, body, description, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth, params
              FROM requests
              WHERE id = ?1",
         )
@@ -321,14 +332,15 @@ fn fetch_request_by_id(conn: &Connection, id: &str) -> std::result::Result<Store
             url: row.get(5).unwrap_or_default(),
             headers: row.get(6).ok(),
             body: row.get(7).ok(),
-            position: row.get(8).unwrap_or_default(),
-            pre_request_script: row.get(9).ok(),
-            post_request_script: row.get(10).ok(),
-            body_type: row.get(11).ok(),
-            form_data: row.get(12).ok(),
-            binary_file_path: row.get(13).ok(),
-            auth: row.get(14).ok(),
-            params: row.get(15).ok(),
+            description: row.get(8).ok(),
+            position: row.get(9).unwrap_or_default(),
+            pre_request_script: row.get(10).ok(),
+            post_request_script: row.get(11).ok(),
+            body_type: row.get(12).ok(),
+            form_data: row.get(13).ok(),
+            binary_file_path: row.get(14).ok(),
+            auth: row.get(15).ok(),
+            params: row.get(16).ok(),
         })
     } else {
         Err("Request not found".to_string())
@@ -337,7 +349,7 @@ fn fetch_request_by_id(conn: &Connection, id: &str) -> std::result::Result<Store
 
 fn fetch_folder_by_id(conn: &Connection, id: &str) -> std::result::Result<Folder, String> {
     let mut stmt = conn
-        .prepare("SELECT id, collection_id, name, position, created_at FROM folders WHERE id = ?1")
+        .prepare("SELECT id, collection_id, name, description, position, created_at FROM folders WHERE id = ?1")
         .map_err(|e| e.to_string())?;
     let mut rows = stmt.query([id]).map_err(|e| e.to_string())?;
     if let Some(row) = rows.next().map_err(|e| e.to_string())? {
@@ -345,8 +357,9 @@ fn fetch_folder_by_id(conn: &Connection, id: &str) -> std::result::Result<Folder
             id: row.get(0).unwrap_or_default(),
             collection_id: row.get(1).unwrap_or_default(),
             name: row.get(2).unwrap_or_default(),
-            position: row.get(3).unwrap_or_default(),
-            created_at: row.get(4).unwrap_or_default(),
+            description: row.get(3).ok(),
+            position: row.get(4).unwrap_or_default(),
+            created_at: row.get(5).unwrap_or_default(),
         })
     } else {
         Err("Folder not found".to_string())
@@ -360,13 +373,14 @@ pub fn create_collection(
     workspace_id: String,
     name: String,
     owner_id: String,
+    description: Option<String>,
     position: i32,
 ) -> std::result::Result<Collection, String> {
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         conn.execute(
-            "INSERT INTO collections (id, workspace_id, name, owner_id, position) VALUES (?1, ?2, ?3, ?4, ?5)",
-            (&id, &workspace_id, &name, &owner_id, &position),
+            "INSERT INTO collections (id, workspace_id, name, owner_id, description, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            (&id, &workspace_id, &name, &owner_id, &description, &position),
         )
         .map_err(|e| e.to_string())?;
 
@@ -384,7 +398,7 @@ pub fn get_collections(
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         let mut stmt = conn
-            .prepare("SELECT id, workspace_id, name, owner_id, position, created_at FROM collections WHERE workspace_id = ?1 ORDER BY position ASC")
+            .prepare("SELECT id, workspace_id, name, owner_id, description, position, created_at FROM collections WHERE workspace_id = ?1 ORDER BY position ASC")
             .map_err(|e| e.to_string())?;
         let collection_iter = stmt
             .query_map([&workspace_id], |row| {
@@ -393,8 +407,9 @@ pub fn get_collections(
                     workspace_id: row.get(1).unwrap_or_default(),
                     name: row.get(2).unwrap_or_default(),
                     owner_id: row.get(3).unwrap_or_default(),
-                    position: row.get(4).unwrap_or_default(),
-                    created_at: row.get(5).unwrap_or_default(),
+                    description: row.get(4).ok(),
+                    position: row.get(5).unwrap_or_default(),
+                    created_at: row.get(6).unwrap_or_default(),
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -418,19 +433,21 @@ pub fn upsert_collection(
     workspace_id: String,
     name: String,
     owner_id: String,
+    description: Option<String>,
     position: i32,
 ) -> std::result::Result<Collection, String> {
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         conn.execute(
-            "INSERT INTO collections (id, workspace_id, name, owner_id, position)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO collections (id, workspace_id, name, owner_id, description, position)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(id) DO UPDATE SET
                workspace_id = excluded.workspace_id,
                name = excluded.name,
                owner_id = excluded.owner_id,
+               description = excluded.description,
                position = excluded.position",
-            (&id, &workspace_id, &name, &owner_id, &position),
+            (&id, &workspace_id, &name, &owner_id, &description, &position),
         )
         .map_err(|e| e.to_string())?;
 
@@ -534,14 +551,14 @@ pub fn duplicate_collection(
     if let Some(conn) = lock.as_ref() {
         let source = fetch_collection_by_id(conn, &source_id)?;
         conn.execute(
-            "INSERT INTO collections (id, workspace_id, name, owner_id, position) VALUES (?1, ?2, ?3, ?4, ?5)",
-            (&new_id, &source.workspace_id, &new_name, &source.owner_id, &source.position),
+            "INSERT INTO collections (id, workspace_id, name, owner_id, description, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            (&new_id, &source.workspace_id, &new_name, &source.owner_id, &source.description, &source.position),
         )
         .map_err(|e| e.to_string())?;
 
         let mut stmt = conn
             .prepare(
-                "SELECT name, method, url, headers, body, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth
+                "SELECT name, method, url, headers, body, description, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth
                  FROM requests
                  WHERE collection_id = ?1",
             )
@@ -555,24 +572,25 @@ pub fn duplicate_collection(
                     row.get::<_, Option<String>>(3).ok().flatten(),
                     row.get::<_, Option<String>>(4).ok().flatten(),
                     row.get::<_, Option<String>>(5).ok().flatten(),
-                    row.get::<_, i32>(6).unwrap_or_default(),
-                    row.get::<_, Option<String>>(7).ok().flatten(),
+                    row.get::<_, Option<String>>(6).ok().flatten(),
+                    row.get::<_, i32>(7).unwrap_or_default(),
                     row.get::<_, Option<String>>(8).ok().flatten(),
                     row.get::<_, Option<String>>(9).ok().flatten(),
                     row.get::<_, Option<String>>(10).ok().flatten(),
                     row.get::<_, Option<String>>(11).ok().flatten(),
                     row.get::<_, Option<String>>(12).ok().flatten(),
+                    row.get::<_, Option<String>>(13).ok().flatten(),
                 ))
             })
             .map_err(|e| e.to_string())?;
 
         for req in req_iter {
-            if let Ok((name, method, url, headers, body, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth)) = req {
+            if let Ok((name, method, url, headers, body, description, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth)) = req {
                 let cloned_id = uuid::Uuid::new_v4().to_string();
                 conn.execute(
-                    "INSERT INTO requests (id, collection_id, name, method, url, headers, body, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-                    (&cloned_id, &new_id, &name, &method, &url, &headers, &body, &folder_id, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path, &auth),
+                    "INSERT INTO requests (id, collection_id, name, method, url, headers, body, description, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                    (&cloned_id, &new_id, &name, &method, &url, &headers, &body, &description, &folder_id, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path, &auth),
                 )
                 .map_err(|e| e.to_string())?;
             }
@@ -595,6 +613,7 @@ pub fn create_request(
     url: String,
     headers: Option<String>,
     body: Option<String>,
+    description: Option<String>,
     position: i32,
     pre_request_script: Option<String>,
     post_request_script: Option<String>,
@@ -607,8 +626,8 @@ pub fn create_request(
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         conn.execute(
-            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth, params) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
-            (&id, &collection_id, &folder_id, &name, &method, &url, &headers, &body, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path, &auth, &params),
+            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, description, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth, params) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            rusqlite::params![&id, &collection_id, &folder_id, &name, &method, &url, &headers, &body, &description, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path, &auth, &params],
         ).map_err(|e| e.to_string())?;
 
         fetch_request_by_id(conn, &id)
@@ -692,7 +711,7 @@ pub fn get_folders(
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         let mut stmt = conn
-            .prepare("SELECT id, collection_id, name, position, created_at FROM folders WHERE collection_id = ?1 ORDER BY position ASC")
+            .prepare("SELECT id, collection_id, name, description, position, created_at FROM folders WHERE collection_id = ?1 ORDER BY position ASC")
             .map_err(|e| e.to_string())?;
         let folder_iter = stmt
             .query_map([&collection_id], |row| {
@@ -700,8 +719,9 @@ pub fn get_folders(
                     id: row.get(0).unwrap_or_default(),
                     collection_id: row.get(1).unwrap_or_default(),
                     name: row.get(2).unwrap_or_default(),
-                    position: row.get(3).unwrap_or_default(),
-                    created_at: row.get(4).unwrap_or_default(),
+                    description: row.get(3).ok(),
+                    position: row.get(4).unwrap_or_default(),
+                    created_at: row.get(5).unwrap_or_default(),
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -766,13 +786,14 @@ pub fn create_folder(
     id: String,
     collection_id: String,
     name: String,
+    description: Option<String>,
     position: i32,
 ) -> std::result::Result<Folder, String> {
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         conn.execute(
-            "INSERT INTO folders (id, collection_id, name, position) VALUES (?1, ?2, ?3, ?4)",
-            (&id, &collection_id, &name, &position),
+            "INSERT INTO folders (id, collection_id, name, description, position) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (&id, &collection_id, &name, &description, &position),
         )
         .map_err(|e| e.to_string())?;
 
@@ -942,6 +963,7 @@ pub fn update_request(
     url: String,
     headers: Option<String>,
     body: Option<String>,
+    description: Option<String>,
     pre_request_script: Option<String>,
     post_request_script: Option<String>,
     body_type: Option<String>,
@@ -955,9 +977,9 @@ pub fn update_request(
         let affected = conn
             .execute(
                 "UPDATE requests
-                 SET name = ?2, method = ?3, url = ?4, headers = ?5, body = ?6, pre_request_script = ?7, post_request_script = ?8, body_type = ?9, form_data = ?10, binary_file_path = ?11, auth = ?12, params = ?13
+                 SET name = ?2, method = ?3, url = ?4, headers = ?5, body = ?6, description = ?7, pre_request_script = ?8, post_request_script = ?9, body_type = ?10, form_data = ?11, binary_file_path = ?12, auth = ?13, params = ?14
                  WHERE id = ?1",
-                (&id, &name, &method, &url, &headers, &body, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path, &auth, &params),
+                rusqlite::params![&id, &name, &method, &url, &headers, &body, &description, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path, &auth, &params],
             )
             .map_err(|e| e.to_string())?;
 
@@ -982,6 +1004,7 @@ pub fn upsert_request(
     url: String,
     headers: Option<String>,
     body: Option<String>,
+    description: Option<String>,
     position: i32,
     pre_request_script: Option<String>,
     post_request_script: Option<String>,
@@ -994,8 +1017,8 @@ pub fn upsert_request(
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         conn.execute(
-            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth, params)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, description, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth, params)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
              ON CONFLICT(id) DO UPDATE SET
                collection_id = excluded.collection_id,
                folder_id = excluded.folder_id,
@@ -1004,6 +1027,7 @@ pub fn upsert_request(
                url = excluded.url,
                headers = excluded.headers,
                body = excluded.body,
+               description = excluded.description,
                position = excluded.position,
                pre_request_script = excluded.pre_request_script,
                post_request_script = excluded.post_request_script,
@@ -1012,7 +1036,7 @@ pub fn upsert_request(
                binary_file_path = excluded.binary_file_path,
                auth = excluded.auth,
                params = excluded.params",
-            (&id, &collection_id, &folder_id, &name, &method, &url, &headers, &body, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path, &auth, &params),
+            rusqlite::params![&id, &collection_id, &folder_id, &name, &method, &url, &headers, &body, &description, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path, &auth, &params],
         )
         .map_err(|e| e.to_string())?;
 
@@ -1072,9 +1096,9 @@ pub fn duplicate_request(
     if let Some(conn) = lock.as_ref() {
         let source = fetch_request_by_id(conn, &source_id)?;
         conn.execute(
-            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth, params)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
-            (
+            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, description, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth, params)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            rusqlite::params![
                 &new_id,
                 &source.collection_id,
                 &source.folder_id,
@@ -1083,6 +1107,7 @@ pub fn duplicate_request(
                 &source.url,
                 &source.headers,
                 &source.body,
+                &source.description,
                 &source.position,
                 &source.pre_request_script,
                 &source.post_request_script,
@@ -1091,7 +1116,7 @@ pub fn duplicate_request(
                 &source.binary_file_path,
                 &source.auth,
                 &source.params,
-            ),
+            ],
         )
         .map_err(|e| e.to_string())?;
 
@@ -1110,7 +1135,7 @@ pub fn get_requests_by_collection(
     if let Some(conn) = lock.as_ref() {
         let mut stmt = conn
             .prepare(
-                "SELECT id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth, params
+                "SELECT id, collection_id, folder_id, name, method, url, headers, body, description, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth, params
                  FROM requests
                  WHERE collection_id = ?1
                  ORDER BY position ASC",
@@ -1128,14 +1153,15 @@ pub fn get_requests_by_collection(
                     url: row.get(5).unwrap_or_default(),
                     headers: row.get(6).ok(),
                     body: row.get(7).ok(),
-                    position: row.get(8).unwrap_or_default(),
-                    pre_request_script: row.get(9).ok(),
-                    post_request_script: row.get(10).ok(),
-                    body_type: row.get(11).ok(),
-                    form_data: row.get(12).ok(),
-                    binary_file_path: row.get(13).ok(),
-                    auth: row.get(14).ok(),
-                    params: row.get(15).ok(),
+                    description: row.get(8).ok(),
+                    position: row.get(9).unwrap_or_default(),
+                    pre_request_script: row.get(10).ok(),
+                    post_request_script: row.get(11).ok(),
+                    body_type: row.get(12).ok(),
+                    form_data: row.get(13).ok(),
+                    binary_file_path: row.get(14).ok(),
+                    auth: row.get(15).ok(),
+                    params: row.get(16).ok(),
                 })
             })
             .map_err(|e| e.to_string())?;

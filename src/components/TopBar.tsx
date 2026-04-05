@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect } from "react";
 import logo from "../assets/logo.png";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronDown, Plus, Search, Settings, User, Users, Keyboard, PanelLeft, PanelRight, Globe, Monitor, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, Search, Settings, User, Users, Keyboard, PanelLeft, PanelRight, Globe, Monitor, Trash2, Code } from "lucide-react";
 import type { Workspace, Environment } from "../types";
 import { EnvironmentSelector } from "./EnvironmentSelector";
 
@@ -25,6 +25,10 @@ type Props = {
   onShareWorkspace: (id: string) => void;
   localIdentity: { instance_name: string; ip_address: string } | null;
   onOpenSettings: () => void;
+  onOpenSearch: () => void;
+  onOpenCode: () => void;
+  onOpenCookies: () => void;
+  hasActiveTab: boolean;
 };
 
 export function TopBar({
@@ -46,7 +50,11 @@ export function TopBar({
   onOpenGlobals,
   onShareWorkspace,
   localIdentity,
-  onOpenSettings
+  onOpenSettings,
+  onOpenSearch,
+  onOpenCode,
+  onOpenCookies,
+  hasActiveTab
 }: Props) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isPeersOpen, setIsPeersOpen] = useState(false);
@@ -103,9 +111,10 @@ export function TopBar({
         </button>
 
         <div className="flex items-center space-x-2 text-primary">
-          <div className="w-6 h-6 flex items-center justify-center">
+          <div className="w-6 h-6 flex items-center justify-center shrink-0">
             <img src={logo} alt="Localman Logo" className="w-full h-full object-contain" />
           </div>
+          <span className="text-[14px] font-black tracking-tighter text-gray-100 select-none hidden sm:inline">LOCALMAN</span>
         </div>
 
         <div className="relative" ref={dropdownRef}>
@@ -202,13 +211,15 @@ export function TopBar({
       <div className="flex-1 max-w-md px-4 md:px-8">
         <div className="relative group">
           <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
-            <Search size={14} className="text-muted group-focus-within:text-primary transition-colors" />
+            <Search size={14} className="text-gray-400 group-focus-within:text-primary transition-colors" />
           </div>
           <input
             id="global-search-input"
             type="text"
             placeholder="Search API..."
-            className="w-full bg-surface/50 border border-border text-[12px] rounded-full pl-10 pr-16 py-1.5 text-gray-200 placeholder-muted/40 focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all font-medium"
+            readOnly
+            onClick={onOpenSearch}
+            className="w-full bg-surface/50 border border-border text-[12px] rounded-full pl-10 pr-16 py-1.5 text-gray-200 placeholder-muted/40 focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all font-medium cursor-pointer"
           />
           <div className="absolute inset-y-0 right-0 hidden md:flex items-center pr-3 pointer-events-none">
             <span className="text-[9px] font-black font-mono text-muted/40 bg-surface/80 px-1.5 py-0.5 rounded border border-border/50">⌘ K</span>
@@ -315,22 +326,39 @@ export function TopBar({
         </div>
 
         <div className="flex items-center space-x-1.5 bg-surface-hover/30 p-1 rounded-lg border border-border/50">
-          <div onClick={onOpenShortcuts} className="p-1.5 text-muted hover:text-primary cursor-pointer transition-all hover:scale-105 active:scale-95" title="Keyboard Shortcuts (?)">
+          <div onClick={onOpenShortcuts} className="p-1.5 text-gray-400 hover:text-primary cursor-pointer transition-all hover:scale-105 active:scale-95" title="Keyboard Shortcuts (?)">
             <Keyboard size={18} />
           </div>
 
-          <div onClick={onOpenGlobals} className="p-1.5 text-muted hover:text-primary cursor-pointer transition-all hover:scale-105 active:scale-95" title="Global Variables">
+          <div onClick={onOpenGlobals} className="p-1.5 text-gray-400 hover:text-primary cursor-pointer transition-all hover:scale-105 active:scale-95" title="Global Variables">
             <Globe size={18} />
           </div>
 
           <div 
             onClick={onOpenSettings}
-            className="p-1.5 text-muted hover:text-primary cursor-pointer transition-all hover:rotate-45 active:scale-95" 
+            className="p-1.5 text-gray-400 hover:text-primary cursor-pointer transition-all hover:rotate-45 active:scale-95" 
             title="Settings"
           >
             <Settings size={18} />
           </div>
+
+          <div 
+            onClick={onOpenCookies}
+            className="p-1.5 text-gray-400 hover:text-primary cursor-pointer transition-all hover:scale-110 active:scale-95" 
+            title="Manage Cookies"
+          >
+            <Globe size={18} className="text-blue-400/60 group-hover:text-blue-400" />
+          </div>
         </div>
+
+        <button
+          onClick={onOpenCode}
+          disabled={!hasActiveTab}
+          className={`p-1.5 rounded-md transition-all active:scale-95 text-gray-400 hover:text-primary border border-transparent hover:border-border disabled:opacity-20`}
+          title="Generate Code Snippet"
+        >
+          <Code size={18} />
+        </button>
 
         <button
           onClick={onToggleInspector}
