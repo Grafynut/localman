@@ -10,9 +10,10 @@ type Props = {
   setItems: Dispatch<SetStateAction<FormDataEntry[]>>;
   environments: Environment[];
   activeEnvId: string | null;
+  globals?: Record<string, string>;
 };
 
-export function FormDataEditor({ items, setItems, environments, activeEnvId }: Props) {
+export function FormDataEditor({ items, setItems, environments, activeEnvId, globals = {} }: Props) {
   const updateItem = (
     index: number,
     field: keyof FormDataEntry,
@@ -81,11 +82,15 @@ export function FormDataEditor({ items, setItems, environments, activeEnvId }: P
                 ) : null}
               </td>
               <td className="border-r border-border align-middle p-0">
-                <input
+                <VariableInput
                   value={item.key}
-                  onChange={(e) => updateItem(index, "key", e.target.value)}
+                  onChange={(val) => updateItem(index, "key", val)}
                   placeholder="Key"
                   className="w-full bg-transparent px-3 py-2 text-[12px] text-gray-100 placeholder-muted/30 focus:outline-none focus:bg-primary/5 font-bold transition-all"
+                  environments={environments}
+                  activeEnvId={activeEnvId}
+                  globals={globals}
+                  isSensitive={item.isSensitive}
                 />
               </td>
               <td className="border-r border-border align-middle p-0">
@@ -122,6 +127,8 @@ export function FormDataEditor({ items, setItems, environments, activeEnvId }: P
                       placeholder="Value"
                       environments={environments}
                       activeEnvId={activeEnvId}
+                      globals={globals}
+                      isSensitive={item.isSensitive}
                       className="w-full bg-transparent px-3 py-2 text-[12px] text-primary/90 placeholder-muted/30 focus:outline-none focus:bg-primary/5 font-mono selection:bg-primary/30 transition-all"
                     />
                   )}

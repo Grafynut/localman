@@ -22,14 +22,16 @@ type Props = {
   isInspectorVisible: boolean;
   onToggleInspector: () => void;
   onOpenGlobals: () => void;
+  onShareWorkspace: (id: string) => void;
   localIdentity: { instance_name: string; ip_address: string } | null;
+  onOpenSettings: () => void;
 };
 
-export function TopBar({ 
+export function TopBar({
   peers,
-  peersCount, 
-  workspaces, 
-  activeWorkspaceId, 
+  peersCount,
+  workspaces,
+  activeWorkspaceId,
   setActiveWorkspaceId,
   onCreateWorkspace,
   environments,
@@ -42,7 +44,9 @@ export function TopBar({
   isInspectorVisible,
   onToggleInspector,
   onOpenGlobals,
-  localIdentity
+  onShareWorkspace,
+  localIdentity,
+  onOpenSettings
 }: Props) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isPeersOpen, setIsPeersOpen] = useState(false);
@@ -106,21 +110,29 @@ export function TopBar({
         </div>
 
         <div className="relative" ref={dropdownRef}>
-          <div 
-            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="flex items-center bg-background/50 border border-border hover:border-primary/50 px-3 py-1.5 rounded-md transition-all cursor-pointer min-w-[180px] group active:scale-[0.98]"
-          >
-            <div className="flex-1 text-[13px] font-bold text-gray-200 truncate">
-              {activeWorkspace?.name || "Select Workspace"}
-            </div>
-            <ChevronDown 
-              size={14} 
-              className={`text-muted transition-transform duration-200 ${isDropdownOpen ? "rotate-180" : ""}`} 
-            />
+          <div className="flex items-center">
+            <button
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className="px-2 py-1.5 flex items-center space-x-2 text-sm font-medium hover:bg-white/5 rounded-md transition-colors border border-transparent hover:border-white/10"
+            >
+              <div className="w-5 h-5 rounded bg-primary/20 flex items-center justify-center text-primary">
+                <Globe size={12} />
+              </div>
+              <span className="max-w-[120px] truncate">{activeWorkspace?.name || "Loading..."}</span>
+              <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isDropdownOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            <button
+              onClick={() => onShareWorkspace(activeWorkspaceId)}
+              className="ml-1 p-1.5 text-muted hover:text-primary hover:bg-primary/10 rounded-md transition-all active:scale-90"
+              title="Share Workspace to all Peers"
+            >
+              <Users size={16} />
+            </button>
           </div>
 
           {isDropdownOpen && (
-            <div className="absolute top-full left-0 mt-2 w-64 bg-surface-hover border border-border rounded-lg shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200 backdrop-blur-xl">
+            <div className="absolute top-full left-0 mt-2 w-64 bg-surface-hover border border-border rounded-lg shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200 backdrop-blur-xl z-50">
               <div className="p-2 border-b border-border">
                 <div className="relative">
                   <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
@@ -144,11 +156,10 @@ export function TopBar({
                         setIsDropdownOpen(false);
                         setSearchQuery("");
                       }}
-                      className={`px-3 py-2 text-[12px] font-semibold cursor-pointer transition-colors flex items-center justify-between ${
-                        ws.id === activeWorkspaceId 
-                          ? "bg-primary/20 text-primary border-r-2 border-primary" 
-                          : "text-gray-300 hover:bg-white/5 hover:text-white"
-                      }`}
+                      className={`px-3 py-2 text-[12px] font-semibold cursor-pointer transition-colors flex items-center justify-between ${ws.id === activeWorkspaceId
+                        ? "bg-primary/20 text-primary border-r-2 border-primary"
+                        : "text-gray-300 hover:bg-white/5 hover:text-white"
+                        }`}
                     >
                       <span className="truncate">{ws.name}</span>
                       {ws.id === activeWorkspaceId && (
@@ -188,7 +199,7 @@ export function TopBar({
 
         <div className="h-5 w-px bg-border/50 mx-1" />
 
-        <EnvironmentSelector 
+        <EnvironmentSelector
           environments={environments}
           activeEnvId={activeEnvId}
           onSetActiveEnv={onSetActiveEnv}
@@ -220,7 +231,7 @@ export function TopBar({
         </div>
 
         <div className="relative" ref={peersRef}>
-          <div 
+          <div
             onClick={() => setIsPeersOpen(!isPeersOpen)}
             className="flex items-center space-x-2 text-muted hover:text-gray-100 cursor-pointer transition-colors group px-2 py-1 rounded-md hover:bg-surface-hover"
             title="Online Peers"
@@ -327,7 +338,11 @@ export function TopBar({
           <Globe size={20} />
         </div>
 
-        <div className="text-muted hover:text-primary cursor-pointer transition-all hover:rotate-45 active:scale-90">
+        <div 
+          onClick={onOpenSettings}
+          className="text-muted hover:text-primary cursor-pointer transition-all hover:rotate-45 active:scale-90" 
+          title="Settings"
+        >
           <Settings size={20} />
         </div>
 

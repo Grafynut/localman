@@ -1,20 +1,87 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #090909;
-  --color-surface: #121212;
-  --color-surface-hover: #1C1C1C;
-  /* --color-primary: #FF6A13; */
-  --color-primary: #50ad5c;
-  --color-primary-hover: #459a50;
-  --color-border: #212121;
-  --color-muted: #6B6B6B;
+  --color-background: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-text: var(--text);
 
   --color-method-get: #0CBB52;
   --color-method-post: #FFB400;
   --color-method-put: #097BED;
   --color-method-delete: #EB2013;
   --color-method-patch: #6B5AE0;
+}
+
+:root {
+  /* Default: Midnight Green */
+  --bg: #090909;
+  --surface: #121212;
+  --surface-hover: #1C1C1C;
+  --primary: #50ad5c;
+  --primary-hover: #459a50;
+  --border: #212121;
+  --muted: #6B6B6B;
+  --text: #ECECEC;
+  
+  --primary-rgb: 80, 173, 92;
+  --bg-rgb: 9, 9, 9;
+}
+
+[data-theme='midnight-orange'] {
+  --primary: #FF6A13;
+  --primary-hover: #E55A00;
+  --primary-rgb: 255, 106, 19;
+}
+
+[data-theme='ocean'] {
+  --bg: #0a111b;
+  --surface: #141d2b;
+  --surface-hover: #1e293b;
+  --primary: #097BED;
+  --primary-hover: #0764c2;
+  --border: #24354b;
+  --primary-rgb: 9, 123, 237;
+}
+
+[data-theme='forest'] {
+  --bg: #121412;
+  --surface: #1b1f1b;
+  --surface-hover: #262c26;
+  --primary: #3d5a44;
+  --primary-hover: #2e4433;
+  --border: #293029;
+  --primary-rgb: 61, 90, 68;
+}
+
+[data-theme='cyberpunk'] {
+  --bg: #0d0221;
+  --surface: #1a054d;
+  --surface-hover: #260a73;
+  --primary: #FF00FF;
+  --primary-hover: #D600D6;
+  --border: #310b91;
+  --primary-rgb: 255, 0, 255;
+}
+
+[data-theme='light'] {
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --surface-hover: #f1f3f5;
+  --primary: #50ad5c;
+  --primary-hover: #459a50;
+  --border: #dee2e6;
+  --muted: #868e96;
+  --text: #212529;
+  --primary-rgb: 80, 173, 92;
+}
+
+* {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
 body {

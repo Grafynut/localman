@@ -15,6 +15,8 @@ import { FormDataEditor } from "./FormDataEditor";
 import { methodColor } from "../utils";
 import { VariableInput } from "./VariableInput";
 import { ScriptSnippets } from "./ScriptSnippets";
+import { ScriptEditor } from "./ScriptEditor";
+import { AuthEditor } from "./AuthEditor";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { KeyValuePair, WorkspaceTab, Environment, FormDataEntry } from "../types";
 
@@ -41,6 +43,7 @@ type Props = {
   onSendRequest: () => void;
   environments: Environment[];
   activeEnvId: string | null;
+  globals: Record<string, string>;
   reqPreRequestScript: string | null;
   setReqPreRequestScript: Dispatch<SetStateAction<string | null>>;
   reqPostRequestScript: string | null;
@@ -51,6 +54,8 @@ type Props = {
   setReqFormData: Dispatch<SetStateAction<FormDataEntry[]>>;
   reqBinaryFilePath: string | null;
   setReqBinaryFilePath: Dispatch<SetStateAction<string | null>>;
+  reqAuth: any;
+  setReqAuth: Dispatch<SetStateAction<any>>;
 };
 
 export function RequestWorkspace({
@@ -76,6 +81,7 @@ export function RequestWorkspace({
   onSendRequest,
   environments,
   activeEnvId,
+  globals,
   reqPreRequestScript,
   setReqPreRequestScript,
   reqPostRequestScript,
@@ -86,6 +92,8 @@ export function RequestWorkspace({
   setReqFormData,
   reqBinaryFilePath,
   setReqBinaryFilePath,
+  reqAuth,
+  setReqAuth,
 }: Props) {
   const [isMethodOpen, setIsMethodOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -211,6 +219,7 @@ export function RequestWorkspace({
             className="flex-1 w-full bg-transparent px-4 py-2 text-gray-100 placeholder-muted/50 focus:outline-none text-[14px] font-medium"
             environments={environments}
             activeEnvId={activeEnvId}
+            globals={globals}
             onEnter={onSendRequest}
           />
 
@@ -262,6 +271,7 @@ export function RequestWorkspace({
                 setItems={setReqHeaders}
                 environments={environments}
                 activeEnvId={activeEnvId}
+                globals={globals}
               />
             )}
             {activeWorkspaceTab === "Params" && (
@@ -270,6 +280,7 @@ export function RequestWorkspace({
                 setItems={setReqParams}
                 environments={environments}
                 activeEnvId={activeEnvId}
+                globals={globals}
               />
             )}
 
@@ -335,6 +346,7 @@ export function RequestWorkspace({
                             type="textarea"
                             environments={environments}
                             activeEnvId={activeEnvId}
+                            globals={globals}
                             onScroll={(e) => {
                               const target = e.currentTarget;
                               const highlight = document.getElementById("req-body-highlight");
@@ -356,6 +368,7 @@ export function RequestWorkspace({
                       setItems={setReqFormData}
                       environments={environments}
                       activeEnvId={activeEnvId}
+                      globals={globals}
                     />
                   )}
 
@@ -426,64 +439,64 @@ export function RequestWorkspace({
             )}
 
             {activeWorkspaceTab === "Pre-request" && (
-              <div className="flex-1 flex bg-background overflow-hidden relative">
-                <div className="flex-1 flex flex-col relative h-full">
-                  <div className="absolute inset-0 p-4 font-mono text-[14px] leading-[21px] text-gray-200 pointer-events-none whitespace-pre overflow-hidden" id="req-pre-script-highlight">
-                    {reqPreRequestScript}
+              <div className="flex-1 flex flex-col bg-background overflow-hidden relative">
+                <div className="px-4 py-2 border-b border-border/50 bg-surface/10 flex items-center justify-between shrink-0">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-primary/70">Pre-request Script</span>
                   </div>
-                  <textarea
+                  <span className="text-[9px] text-muted font-mono opacity-50">Runs before Request</span>
+                </div>
+                <div className="flex-1 flex overflow-hidden relative">
+                  <ScriptEditor
                     id="pre-script-textarea"
                     value={reqPreRequestScript || ""}
-                    onChange={(e) => setReqPreRequestScript(e.target.value)}
+                    onChange={setReqPreRequestScript}
                     placeholder="// Write JavaScript code here. Available API: pm.*"
-                    spellCheck={false}
-                    onScroll={(e) => {
-                      const target = e.currentTarget;
-                      const highlight = document.getElementById("req-pre-script-highlight");
-                      if (highlight) {
-                        highlight.scrollTop = target.scrollTop;
-                        highlight.scrollLeft = target.scrollLeft;
-                      }
-                    }}
-                    className="w-full h-full bg-transparent p-4 text-[14px] font-mono text-transparent caret-white focus:outline-none resize-none leading-[21px] selection:bg-primary/20 relative z-10 whitespace-pre overflow-auto"
+                    className="flex-1"
                   />
-                </div>
-                <div className="w-64 border-l border-border bg-surface/5">
-                  <ScriptSnippets onInsert={(code) => insertSnippet(code, "pre")} />
+                  <div className="w-64 border-l border-border bg-surface/5">
+                    <ScriptSnippets onInsert={(code) => insertSnippet(code, "pre")} />
+                  </div>
                 </div>
               </div>
             )}
-
+            
             {activeWorkspaceTab === "Tests" && (
-              <div className="flex-1 flex bg-background overflow-hidden relative">
-                <div className="flex-1 flex flex-col relative h-full">
-                  <div className="absolute inset-0 p-4 font-mono text-[14px] leading-[21px] text-gray-200 pointer-events-none whitespace-pre overflow-hidden" id="req-post-script-highlight">
-                    {reqPostRequestScript}
+              <div className="flex-1 flex flex-col bg-background overflow-hidden relative">
+                <div className="px-4 py-2 border-b border-border/50 bg-surface/10 flex items-center justify-between shrink-0">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
+                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-green-500/70">Response Tests</span>
                   </div>
-                  <textarea
+                  <span className="text-[9px] text-muted font-mono opacity-50">Runs after Response</span>
+                </div>
+                <div className="flex-1 flex overflow-hidden relative">
+                  <ScriptEditor
                     id="post-script-textarea"
                     value={reqPostRequestScript || ""}
-                    onChange={(e) => setReqPostRequestScript(e.target.value)}
+                    onChange={setReqPostRequestScript}
                     placeholder="// Write JavaScript code to validate the response. Available API: pm.*"
-                    spellCheck={false}
-                    onScroll={(e) => {
-                      const target = e.currentTarget;
-                      const highlight = document.getElementById("req-post-script-highlight");
-                      if (highlight) {
-                        highlight.scrollTop = target.scrollTop;
-                        highlight.scrollLeft = target.scrollLeft;
-                      }
-                    }}
-                    className="w-full h-full bg-transparent p-4 text-[14px] font-mono text-transparent caret-white focus:outline-none resize-none leading-[21px] selection:bg-primary/20 relative z-10 whitespace-pre overflow-auto"
+                    className="flex-1"
                   />
-                </div>
-                <div className="w-64 border-l border-border bg-surface/5">
-                  <ScriptSnippets onInsert={(code) => insertSnippet(code, "post")} />
+                  <div className="w-64 border-l border-border bg-surface/5">
+                    <ScriptSnippets onInsert={(code) => insertSnippet(code, "post")} />
+                  </div>
                 </div>
               </div>
             )}
 
-            {["Auth", "Docs"].includes(activeWorkspaceTab) && (
+            {activeWorkspaceTab === "Auth" && (
+               <AuthEditor 
+                 auth={reqAuth} 
+                 onChange={setReqAuth} 
+                 environments={environments}
+                 activeEnvId={activeEnvId}
+                 globals={globals}
+               />
+            )}
+
+            {["Docs"].includes(activeWorkspaceTab) && (
               <div className="flex items-center justify-center h-full text-muted text-sm font-mono bg-background/50">
                 <span>
                   No saved {activeWorkspaceTab.toLowerCase()} data for this

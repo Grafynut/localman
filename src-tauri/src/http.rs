@@ -11,6 +11,33 @@ pub struct HttpRequestParams {
     pub body_type: Option<String>,
     pub form_data: Option<Vec<FormDataEntry>>,
     pub binary_file_path: Option<String>,
+    pub auth: Option<AuthParams>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AuthParams {
+    pub r#type: String, // "none", "bearer", "basic", "apikey"
+    pub bearer: Option<BearerConfig>,
+    pub basic: Option<BasicConfig>,
+    pub apikey: Option<ApiKeyConfig>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BearerConfig {
+    pub token: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BasicConfig {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ApiKeyConfig {
+    pub key: String,
+    pub value: String,
+    pub add_to: String, // "header" or "query"
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -58,6 +85,39 @@ pub async fn execute_request(params: HttpRequestParams) -> Result<HttpResponseRe
 
     // Build Request
     let mut request_builder = client.request(method, &params.url).headers(header_map);
+
+    // Apply Authentication
+    if let Some(auth) = params.auth {
+        match auth.r#type.as_str() {
+            "bearer" => {
+                if let Some(config) = auth.bearer {
+                    request_builder = request_builder.bearer_auth(config.token);
+                }
+            }
+            "basic" => {
+                if let Some(config) = auth.basic {
+                    request_builder = request_builder.basic_auth(config.username, Some(config.password));
+                }
+            }
+            "apikey" => {
+                if let Some(config) = auth.apikey {
+                    if config.add_to == "query" {
+                        request_builder = request_builder.query(&[(config.key, config.value)]);
+                    } else {
+                        // Header is already handled by header_map if user added it manually, 
+                        // but we handle it here for the dedicated Auth UI
+                        if let (Ok(name), Ok(value)) = (
+                            HeaderName::from_bytes(config.key.as_bytes()),
+                            HeaderValue::from_str(&config.value),
+                        ) {
+                            request_builder = request_builder.header(name, value);
+                        }
+                    }
+                }
+            }
+            _ => {} // "none" or unknown
+        }
+    }
 
     let body_type = params.body_type.unwrap_or_else(|| "raw".to_string());
 

@@ -28,6 +28,7 @@ import type {
   RunnerReport,
   RunnerResult,
 } from "./types";
+import { defaultAuthConfig } from "./types";
 import { CollectionRunnerModal, type RunnerConfig } from "./components/CollectionRunnerModal";
 import {
   emptyKeyValueRow,
@@ -36,6 +37,10 @@ import {
   parseHeadersToRows,
   parseFormDataToRows,
   resolveVariables,
+  resolveAuthVariables,
+  formDataRowsToEntries,
+  parseCurl,
+  parsePostman,
 } from "./utils";
 import { EnvironmentManager } from "./components/EnvironmentManager";
 import { ImportModal } from "./components/ImportModal";
@@ -44,11 +49,11 @@ import { CodeSnippetModal } from "./components/CodeSnippetModal";
 import { GlobalVariablesModal } from "./components/GlobalVariablesModal";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { v4 as uuidv4 } from "uuid";
-import { parseCurl, parsePostman } from "./utils";
 import "./App.css";
 import { invoke } from "@tauri-apps/api/core";
 import { executeScript } from "./utils/sandbox";
 import { Play } from "lucide-react";
+import { SettingsModal, type ThemeId } from "./components/SettingsModal";
 
 function App() {
   const LOCAL_USER_ID = "local_user_1";
@@ -99,10 +104,16 @@ function App() {
   const [localIdentity, setLocalIdentity] = useState<{ instance_name: string; ip_address: string } | null>(null);
   const [connectedPeerIps, setConnectedPeerIps] = useState<Record<string, boolean>>({});
   const [sharingPeerIp, setSharingPeerIp] = useState<string | null>(null);
-  const [peerCollections, setPeerCollections] = useState<Record<string, Array<{id: string, name: string, owner_id: string}>>>({});
+  const [peerCollections, setPeerCollections] = useState<Record<string, Array<{ id: string, name: string, owner_id: string, workspace_id: string }>>>({});
+  const [peerWorkspaces, setPeerWorkspaces] = useState<Record<string, Array<Workspace>>>({});
 
   const [isSending, setIsSending] = useState(false);
   const [globals, setGlobals] = useState<Record<string, string>>({});
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemeId>(() => {
+    const saved = localStorage.getItem("localman.theme");
+    return (saved as ThemeId) || "default";
+  });
   const globalsRef = useRef<Record<string, string>>(globals);
 
   useEffect(() => {
@@ -167,6 +178,16 @@ function App() {
       return `${Date.now()}-${generateId()}`;
     }
   }, []);
+
+  // Theme effect
+  useEffect(() => {
+    if (theme === "default") {
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    localStorage.setItem("localman.theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     localStorage.setItem("localman.globals", JSON.stringify(globals));
@@ -270,7 +291,12 @@ function App() {
             // Import Collections
             for (const col of (parsed.collections || [])) {
               if (!collections.some(c => c.id === col.id)) {
-                await invoke("create_collection", { ...col, workspaceId: activeWorkspaceId, workspace_id: activeWorkspaceId });
+                await invoke("create_collection", {
+                  ...col,
+                  workspaceId: activeWorkspaceId,
+                  workspace_id: activeWorkspaceId,
+                  position: collections.length
+                });
               }
             }
 
@@ -335,7 +361,8 @@ function App() {
       (activeTab.body || "") !== (activeRequest.body || "") ||
       JSON.stringify(currentHeadersObj) !== JSON.stringify(savedHeadersObj) ||
       (activeTab.preRequestScript || "") !== (activeRequest.pre_request_script || "") ||
-      (activeTab.postRequestScript || "") !== (activeRequest.post_request_script || "")
+      (activeTab.postRequestScript || "") !== (activeRequest.post_request_script || "") ||
+      JSON.stringify(activeTab.auth) !== (activeRequest.auth ? activeRequest.auth : JSON.stringify(defaultAuthConfig))
     );
   }, [activeTab, activeRequest]);
 
@@ -363,10 +390,11 @@ function App() {
         url: activeTab.url,
         headers: JSON.stringify(headerRowsToObject(activeTab.headers)),
         body: activeTab.body,
-        body_type: activeTab.bodyType,
-        form_data: JSON.stringify(activeTab.formData),
-        binary_file_path: activeTab.binaryFilePath,
+        bodyType: activeTab.bodyType,
+        formData: formDataRowsToEntries(activeTab.formData),
+        binaryFilePath: activeTab.binaryFilePath,
         collection_id: activeCollectionId,
+        auth: activeTab.auth,
       };
 
       void broadcastSyncEvent("Update", "Request", activeTab.requestId, syncPayload, true);
@@ -382,7 +410,8 @@ function App() {
     activeTab?.bodyType,
     activeTab?.formData,
     activeTab?.binaryFilePath,
-    activeTab?.isDirty
+    activeTab?.isDirty,
+    activeTab?.auth
   ]);
 
   // Resize handlers
@@ -531,7 +560,8 @@ function App() {
             headers: null, // Default headers
             body: null, // Default body
             params: null, // Default params
-            position: requestCount + 1
+            position: requestCount + 1,
+            auth: JSON.stringify(defaultAuthConfig),
           });
 
           setRequestsByCollection((prev) => {
@@ -648,9 +678,10 @@ function App() {
                 key: resolveVariables(entry.key, resolutionContext),
                 value: entry.type === "text" ? resolveVariables(entry.value, resolutionContext) : entry.value
               })) : [],
-              binary_file_path: req.binary_file_path ? resolveVariables(req.binary_file_path, resolutionContext) : null,
-            }
-          });
+               binary_file_path: req.binary_file_path ? resolveVariables(req.binary_file_path, resolutionContext) : null,
+               auth: req.auth ? resolveAuthVariables(JSON.parse(req.auth), resolutionContext) : null,
+             }
+           });
 
           let tests: any[] = [];
           let passed = true;
@@ -857,6 +888,7 @@ function App() {
       bodyType: (request.body_type as any) || "raw",
       formData: parseFormDataToRows(request.form_data),
       binaryFilePath: request.binary_file_path || null,
+      auth: request.auth ? JSON.parse(request.auth) : defaultAuthConfig,
     };
 
     setOpenTabs(prev => [...prev, newTab]);
@@ -921,8 +953,10 @@ function App() {
         const newColId = generateId();
         const created = await invoke<Collection>("create_collection", {
           id: newColId,
+          workspaceId: activeWorkspaceId,
           name: "Imported cURL",
-          workspace_id: activeWorkspaceId,
+          ownerId: LOCAL_USER_ID,
+          position: collections.length,
         });
         setCollections((prev) => [...prev, created]);
         collectionId = created.id;
@@ -943,6 +977,7 @@ function App() {
         params: JSON.stringify({}),
         position: 0,
         created_at: new Date().toISOString(),
+        auth: JSON.stringify(defaultAuthConfig),
       };
 
       await invoke("create_request", {
@@ -957,6 +992,7 @@ function App() {
         body: newRequest.body,
         params: newRequest.params,
         position: 0,
+        auth: newRequest.auth,
       });
 
       setRequestsByCollection((prev) => ({
@@ -981,8 +1017,10 @@ function App() {
       for (const col of newCols) {
         const createdCol = await invoke<Collection>("create_collection", {
           id: col.id,
+          workspaceId: activeWorkspaceId,
           name: col.name,
-          workspace_id: activeWorkspaceId,
+          ownerId: LOCAL_USER_ID,
+          position: collections.length,
         });
         setCollections((prev) => [...prev, createdCol]);
         if (collections.length === 0 || !activeCollectionId) {
@@ -1020,6 +1058,7 @@ function App() {
             body: req.body,
             params: req.params,
             position: 0,
+            auth: req.auth || JSON.stringify(defaultAuthConfig),
           });
           void broadcastSyncEvent("Create", "Request", req.id, req);
         }
@@ -1145,18 +1184,24 @@ function App() {
       return;
     }
 
-    const peerIp = Object.entries(peers).find(([name]) => name === event.origin_device)?.[1] 
-                    || event.origin_device;
+    const peerIp = Object.entries(peers).find(([name]) => name === event.origin_device)?.[1]
+      || event.origin_device;
 
     if (event.action === "RequestAccess") {
-      const colId = event.entity_id;
-      const colName = payload.name || "a collection";
+      const entityId = event.entity_id;
+      const entityName = payload.name || "an item";
+      const entityType = event.entity_type;
+
       openConfirm({
         title: "Access Request",
-        description: `A collaborator (${peerIp}) wants to download "${colName}". Allow?`,
+        description: `A collaborator (${peerIp}) wants to download ${entityType} "${entityName}". Allow?`,
         confirmLabel: "Grant Access",
         onConfirm: () => {
-          handleGrantAccess(peerIp, colId);
+          if (entityType === "Workspace") {
+            handleGrantWorkspaceAccess(peerIp, entityId);
+          } else {
+            handleGrantAccess(peerIp, entityId);
+          }
         }
       });
       return;
@@ -1164,6 +1209,17 @@ function App() {
 
     const isGrant = event.action === "GrantAccess";
     const action = isGrant ? "Create" : event.action;
+
+    if (event.entity_type === "Workspace") {
+      const rawPayload = payload as Workspace;
+      if (action === "Create" || action === "Update") {
+        setPeerWorkspaces(prev => ({
+          ...prev,
+          [event.origin_device]: [...(prev[event.origin_device] || []).filter(w => w.id !== rawPayload.id), rawPayload]
+        }));
+      }
+      return;
+    }
 
     if (event.entity_type === "Collection") {
       if (action === "Delete") {
@@ -1315,9 +1371,10 @@ function App() {
       if (!collectionsRef.current.some((collection) => collection.id === collectionId)) {
         const placeholderCollection = await invoke<Collection>("upsert_collection", {
           id: collectionId,
+          workspaceId: activeWorkspaceId,
           name: `Shared Collection ${collectionId.slice(0, 4)}`,
           ownerId: LOCAL_USER_ID,
-          owner_id: LOCAL_USER_ID,
+          position: collections.length,
         });
         setCollections((prev) => {
           if (prev.some((collection) => collection.id === placeholderCollection.id)) {
@@ -1342,6 +1399,7 @@ function App() {
       const bodyType = typeof payload.body_type === "string" ? payload.body_type : "raw";
       const formData = typeof payload.form_data === "string" ? payload.form_data : null;
       const binaryFilePath = typeof payload.binary_file_path === "string" ? payload.binary_file_path : null;
+      const auth = typeof payload.auth === "string" ? payload.auth : JSON.stringify(defaultAuthConfig);
 
       const headers = normalizeHeadersForStorage(payload.headers);
       const body = normalizeBodyForStorage(payload.body);
@@ -1368,6 +1426,7 @@ function App() {
         form_data: formData,
         binaryFilePath,
         binary_file_path: binaryFilePath,
+        auth,
       });
       setRequestsByCollection((prev) => {
         const current = prev[upserted.collection_id] || [];
@@ -1553,7 +1612,7 @@ function App() {
 
     try {
       const result = await invoke<Collection[]>("get_collections", {
-        workspace_id: targetWsId,
+        workspaceId: targetWsId,
       });
 
       setCollections(result);
@@ -1663,7 +1722,7 @@ function App() {
 
   const broadcastCollectionsMetadata = useCallback(async () => {
     if (Object.keys(peers).length === 0) return;
-    const metadata = collections.map(c => ({ id: c.id, name: c.name, owner_id: c.owner_id }));
+    const metadata = collections.map(c => ({ id: c.id, name: c.name, owner_id: c.owner_id, workspace_id: c.workspace_id }));
     void broadcastSyncEvent("Metadata" as any, "PeerMetadata" as any, localDeviceId, metadata, true);
   }, [collections, peers, localDeviceId]);
 
@@ -1674,7 +1733,7 @@ function App() {
     }
     const interval = setInterval(() => {
       broadcastCollectionsMetadata();
-    }, 15000); 
+    }, 15000);
     broadcastCollectionsMetadata();
     return () => clearInterval(interval);
   }, [broadcastCollectionsMetadata, peers]);
@@ -1862,6 +1921,7 @@ function App() {
             workspaceId: activeWorkspaceId,
             name: name.trim(),
             ownerId: LOCAL_USER_ID,
+            position: collections.length,
           });
 
           setCollections((prev) => [...prev, newCollection]);
@@ -1919,11 +1979,8 @@ function App() {
         try {
           const duplicated = await invoke<Collection>("duplicate_collection", {
             sourceId: collection.id,
-            source_id: collection.id,
             newId,
-            new_id: newId,
             newName: name.trim(),
-            new_name: name.trim(),
           });
           setCollections((prev) => [...prev, duplicated]);
           setExpandedCollections((prev) => ({ ...prev, [duplicated.id]: true }));
@@ -1989,6 +2046,26 @@ function App() {
     });
   }
 
+  async function handleShareWorkspace(workspaceId: string) {
+    const ws = workspaces.find(w => w.id === workspaceId);
+    if (!ws) return;
+
+    // 1. Share Workspace metadata
+    void broadcastSyncEvent("Create", "Workspace", ws.id, ws);
+
+    // 2. Share all Collections within this workspace
+    const workspaceCols = collections.filter(c => c.workspace_id === workspaceId);
+    for (const col of workspaceCols) {
+      await handleShareCollection(col.id);
+    }
+
+    showToast({
+      kind: "success",
+      title: "Workspace Shared",
+      description: `Broadcasted "${ws.name}" and its collections to all Peers.`
+    });
+  }
+
   async function handleShareCollection(collectionId: string) {
     const col = collections.find(c => c.id === collectionId);
     if (!col) return;
@@ -2007,12 +2084,6 @@ function App() {
     for (const request of requests) {
       void broadcastSyncEvent("Create", "Request", request.id, request);
     }
-
-    showToast({
-      kind: "success",
-      title: "Collection Shared",
-      description: `Broadcasted "${col.name}" to all Peers.`
-    });
   }
 
   async function handleRequestDownload(peerIp: string, collectionId: string) {
@@ -2023,6 +2094,20 @@ function App() {
       title: "Request Sent",
       description: `Asking permission for "${colName}"...`
     });
+  }
+
+  async function handleGrantWorkspaceAccess(peerIp: string, workspaceId: string) {
+    const ws = workspaces.find(w => w.id === workspaceId);
+    if (!ws) return;
+
+    // 1. Grant Workspace metadata
+    void sendTargetedSyncEvent(peerIp, "GrantAccess", "Workspace", ws.id, ws);
+
+    // 2. Grant all Collections within this workspace
+    const workspaceCols = collections.filter(c => c.workspace_id === workspaceId);
+    for (const col of workspaceCols) {
+      await handleGrantAccess(peerIp, col.id);
+    }
   }
 
   async function handleGrantAccess(peerIp: string, collectionId: string) {
@@ -2349,10 +2434,9 @@ function App() {
           const createdCollection = await invoke<Collection>("create_collection", {
             id: generateId(),
             workspaceId: activeWorkspaceId,
-            workspace_id: activeWorkspaceId,
             name: name.trim(),
             ownerId: LOCAL_USER_ID,
-            owner_id: LOCAL_USER_ID,
+            position: collections.length,
           });
 
           setCollections((prev) => [...prev, createdCollection]);
@@ -2600,6 +2684,7 @@ function App() {
             value: entry.type === "text" ? resolveVariables(entry.value, resolutionContext) : entry.value
           })) : null,
           binary_file_path: activeTab.bodyType === "binary" ? (activeTab.binaryFilePath ? resolveVariables(activeTab.binaryFilePath, resolutionContext) : null) : null,
+          auth: resolveAuthVariables(activeTab.auth, resolutionContext),
         },
       });
 
@@ -2750,7 +2835,19 @@ function App() {
           ),
         };
       });
-      applyStoredRequest(updated);
+      setOpenTabs(prev => prev.map(t => t.id === activeTabId ? {
+        ...t,
+        isDirty: false,
+        name: updated.name,
+        method: updated.method,
+        url: updated.url,
+        body: updated.body || "",
+        headers: parseHeadersToRows(updated.headers),
+        bodyType: (updated.body_type as any) || "raw",
+        formData: parseFormDataToRows(updated.form_data),
+        binaryFilePath: updated.binary_file_path || null,
+        auth: updated.auth ? JSON.parse(updated.auth) : t.auth
+      } : t));
       void broadcastSyncEvent("Update", "Request", updated.id, updated);
       showToast({
         kind: "success",
@@ -2948,6 +3045,8 @@ function App() {
         isInspectorVisible={isInspectorVisible}
         onToggleInspector={() => setIsInspectorVisible(!isInspectorVisible)}
         onOpenGlobals={() => setIsGlobalsModalOpen(true)}
+        onShareWorkspace={handleShareWorkspace}
+        onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -2955,126 +3054,129 @@ function App() {
           <>
             <div style={{ width: `${sidebarWidth}px` }} className="flex shrink-0">
               <CollectionsSidebar
-            collections={collections}
-            foldersByCollection={foldersByCollection}
-            activeCollectionId={activeCollectionId}
-            setActiveCollectionId={(id) => setActiveCollectionId(id)}
-            expandedCollections={expandedCollections}
-            toggleCollectionExpanded={(id) => toggleCollectionExpanded(id)}
-            expandedFolders={expandedFolders}
-            toggleFolderExpanded={(id) => toggleFolderExpanded(id)}
-            requestsByCollection={requestsByCollection}
-            activeRequestId={activeTab?.requestId ?? null}
-            activeRequestIsDirty={isDirty}
-            onSelectRequest={(request) => {
-              applyStoredRequest(request);
-            }}
-            onHide={() => setIsSidebarVisible(false)}
-            onCreateCollection={() => handleCreateCollectionClick()}
-            peerCollections={peerCollections}
-            onDownloadRequest={handleRequestDownload}
-            onShareCollection={handleShareCollection}
-            peersCount={Object.keys(peers).length}
-            onCreateFolder={(collectionId) => {
-              openPrompt({
-                title: "New Folder",
-                description: "Group requests within your collection.",
-                confirmLabel: "Create Folder",
-                placeholder: "e.g., Auth, Payments",
-                onConfirm: async (name) => {
-                  if (!name) return;
-                  try {
-                    const folder = await invoke<Folder>("create_folder", {
-                      id: uuidv4(),
-                      collectionId,
-                      name,
-                      position: (foldersByCollection[collectionId]?.length || 0) + 1
-                    });
-                    setFoldersByCollection(prev => ({
-                      ...prev,
-                      [collectionId]: [...(prev[collectionId] || []), folder]
-                    }));
-                    setExpandedFolders(prev => ({ ...prev, [folder.id]: true }));
-                    void broadcastSyncEvent("Create", "Folder", folder.id, folder);
-                  } catch (err) {
-                    console.error("Failed to create folder:", err);
-                  }
-                }
-              });
-            }}
-            onCreateRequest={handleCreateRequestClick}
-            onCopyCollection={handleCopyCollection}
-            onPasteCollection={handlePasteCollection}
-            onRenameCollection={handleRenameCollection}
-            onDuplicateCollection={handleDuplicateCollection}
-            onDeleteCollection={handleDeleteCollection}
-            onRenameFolder={(folder) => {
-              openPrompt({
-                title: "Rename Folder",
-                defaultValue: folder.name,
-                confirmLabel: "Rename",
-                onConfirm: async (name) => {
-                  if (!name || name === folder.name) return;
-                  try {
-                    const updated = await invoke<Folder>("rename_folder", { id: folder.id, name });
-                    setFoldersByCollection(prev => ({
-                      ...prev,
-                      [folder.collection_id]: (prev[folder.collection_id] || []).map(f => f.id === updated.id ? updated : f)
-                    }));
-                    void broadcastSyncEvent("Update", "Folder", updated.id, updated);
-                  } catch (err) {
-                    console.error("Failed to rename folder:", err);
-                  }
-                }
-              });
-            }}
-            onDeleteFolder={(folder) => {
-              openConfirm({
-                title: "Delete Folder",
-                description: `Are you sure you want to delete "${folder.name}"? This will also remove all requests inside this folder.`,
-                confirmLabel: "Delete",
-                isDestructive: true,
-                onConfirm: async () => {
-                  try {
-                    await invoke("delete_folder", { id: folder.id });
-                    setFoldersByCollection(prev => ({
-                      ...prev,
-                      [folder.collection_id]: (prev[folder.collection_id] || []).filter(f => f.id !== folder.id)
-                    }));
-                    setRequestsByCollection((prev) => {
-                      const current = prev[folder.collection_id] || [];
-                      return {
-                        ...prev,
-                        [folder.collection_id]: current.filter(r => r.folder_id !== folder.id)
-                      };
-                    });
-                    void broadcastSyncEvent("Delete", "Folder", folder.id, { id: folder.id, collection_id: folder.collection_id });
-                  } catch (err) {
-                    console.error("Failed to delete folder:", err);
-                  }
-                }
-              });
-            }}
-            onDuplicateFolder={handleDuplicateFolder}
-            onMoveFolder={handleMoveFolder}
-            onMoveCollection={handleMoveCollection}
-            onMoveRequest={handleMoveRequest}
-            onCopyRequest={handleCopyRequest}
-            onPasteRequest={handlePasteRequest}
-            onRenameRequest={handleRenameRequest}
-            onDuplicateRequest={handleDuplicateRequest}
-            onDeleteRequest={handleDeleteRequest}
-            activeWorkspaceId={activeWorkspaceId}
-            onExportWorkspace={handleExportWorkspace}
-            onImportWorkspace={handleImportWorkspace}
-            isLoadingRequests={isLoadingRequests}
-            onHistory={() => setIsHistoryOpen(true)}
-            onRunCollection={handleRunCollection}
-            onRunFolder={handleRunFolder}
-            />
-          </div>
+                collections={collections}
+                foldersByCollection={foldersByCollection}
+                activeCollectionId={activeCollectionId}
+                setActiveCollectionId={(id) => setActiveCollectionId(id)}
+                expandedCollections={expandedCollections}
+                toggleCollectionExpanded={(id) => toggleCollectionExpanded(id)}
+                expandedFolders={expandedFolders}
+                toggleFolderExpanded={(id) => toggleFolderExpanded(id)}
+                requestsByCollection={requestsByCollection}
+                activeRequestId={activeTab?.requestId ?? null}
+                activeRequestIsDirty={isDirty}
+                onSelectRequest={(request) => {
+                  applyStoredRequest(request);
+                }}
+                onHide={() => setIsSidebarVisible(false)}
+                onCreateCollection={() => handleCreateCollectionClick()}
+                peerCollections={peerCollections}
+                peerWorkspaces={peerWorkspaces}
+                peers={peers}
+                activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
+                onDownloadRequest={handleRequestDownload}
+                onShareCollection={handleShareCollection}
+                peersCount={Object.keys(peers).length}
+                onCreateFolder={(collectionId) => {
+                  openPrompt({
+                    title: "New Folder",
+                    description: "Group requests within your collection.",
+                    confirmLabel: "Create Folder",
+                    placeholder: "e.g., Auth, Payments",
+                    onConfirm: async (name) => {
+                      if (!name) return;
+                      try {
+                        const folder = await invoke<Folder>("create_folder", {
+                          id: uuidv4(),
+                          collectionId,
+                          name,
+                          position: (foldersByCollection[collectionId]?.length || 0) + 1
+                        });
+                        setFoldersByCollection(prev => ({
+                          ...prev,
+                          [collectionId]: [...(prev[collectionId] || []), folder]
+                        }));
+                        setExpandedFolders(prev => ({ ...prev, [folder.id]: true }));
+                        void broadcastSyncEvent("Create", "Folder", folder.id, folder);
+                      } catch (err) {
+                        console.error("Failed to create folder:", err);
+                      }
+                    }
+                  });
+                }}
+                onCreateRequest={handleCreateRequestClick}
+                onCopyCollection={handleCopyCollection}
+                onPasteCollection={handlePasteCollection}
+                onRenameCollection={handleRenameCollection}
+                onDuplicateCollection={handleDuplicateCollection}
+                onDeleteCollection={handleDeleteCollection}
+                onRenameFolder={(folder) => {
+                  openPrompt({
+                    title: "Rename Folder",
+                    defaultValue: folder.name,
+                    confirmLabel: "Rename",
+                    onConfirm: async (name) => {
+                      if (!name || name === folder.name) return;
+                      try {
+                        const updated = await invoke<Folder>("rename_folder", { id: folder.id, name });
+                        setFoldersByCollection(prev => ({
+                          ...prev,
+                          [folder.collection_id]: (prev[folder.collection_id] || []).map(f => f.id === updated.id ? updated : f)
+                        }));
+                        void broadcastSyncEvent("Update", "Folder", updated.id, updated);
+                      } catch (err) {
+                        console.error("Failed to rename folder:", err);
+                      }
+                    }
+                  });
+                }}
+                onDeleteFolder={(folder) => {
+                  openConfirm({
+                    title: "Delete Folder",
+                    description: `Are you sure you want to delete "${folder.name}"? This will also remove all requests inside this folder.`,
+                    confirmLabel: "Delete",
+                    isDestructive: true,
+                    onConfirm: async () => {
+                      try {
+                        await invoke("delete_folder", { id: folder.id });
+                        setFoldersByCollection(prev => ({
+                          ...prev,
+                          [folder.collection_id]: (prev[folder.collection_id] || []).filter(f => f.id !== folder.id)
+                        }));
+                        setRequestsByCollection((prev) => {
+                          const current = prev[folder.collection_id] || [];
+                          return {
+                            ...prev,
+                            [folder.collection_id]: current.filter(r => r.folder_id !== folder.id)
+                          };
+                        });
+                        void broadcastSyncEvent("Delete", "Folder", folder.id, { id: folder.id, collection_id: folder.collection_id });
+                      } catch (err) {
+                        console.error("Failed to delete folder:", err);
+                      }
+                    }
+                  });
+                }}
+                onDuplicateFolder={handleDuplicateFolder}
+                onMoveFolder={handleMoveFolder}
+                onMoveCollection={handleMoveCollection}
+                onMoveRequest={handleMoveRequest}
+                onCopyRequest={handleCopyRequest}
+                onPasteRequest={handlePasteRequest}
+                onRenameRequest={handleRenameRequest}
+                onDuplicateRequest={handleDuplicateRequest}
+                onDeleteRequest={handleDeleteRequest}
+                activeWorkspaceId={activeWorkspaceId}
+                onExportWorkspace={handleExportWorkspace}
+                onImportWorkspace={handleImportWorkspace}
+                isLoadingRequests={isLoadingRequests}
+                onHistory={() => setIsHistoryOpen(true)}
+                onRunCollection={handleRunCollection}
+                onRunFolder={handleRunFolder}
+              />
+            </div>
             <div
-              className={`w-1.5 h-full bg-border/10 cursor-col-resize hover:bg-primary/30 transition-colors shrink-0 z-20 relative group ${isResizingSidebar ? 'bg-primary/40' : ''}`}
+              className={`w-1.5 h-full bg-border/10 cursor-col-resize hover:bg-primary/30 transition-colors shrink-0 z-20 relative group !z-0 ${isResizingSidebar ? 'bg-primary/40' : ''}`}
               onMouseDown={handleSidebarResizeStart}
             >
               <div className={`absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 bg-border/50 group-hover:bg-primary/60 transition-colors ${isResizingSidebar ? 'bg-primary' : ''}`} />
@@ -3167,6 +3269,7 @@ function App() {
                   isSending={isSending}
                   environments={environments}
                   activeEnvId={activeEnvId}
+                  globals={globals}
                   reqPreRequestScript={activeTab.preRequestScript}
                   setReqPreRequestScript={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, preRequestScript: typeof val === 'function' ? val(t.preRequestScript) : val, isDirty: true } : t))}
                   reqPostRequestScript={activeTab.postRequestScript}
@@ -3177,6 +3280,8 @@ function App() {
                   setReqFormData={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, formData: typeof val === 'function' ? val(t.formData) : val, isDirty: true } : t))}
                   reqBinaryFilePath={activeTab.binaryFilePath}
                   setReqBinaryFilePath={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, binaryFilePath: typeof val === 'function' ? val(t.binaryFilePath) : val, isDirty: true } : t))}
+                  reqAuth={activeTab.auth}
+                  setReqAuth={(val) => setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, auth: typeof val === 'function' ? val(t.auth) : val, isDirty: true } : t))}
                 />
 
                 <div
@@ -3273,6 +3378,13 @@ function App() {
       <ShortcutsModal
         isOpen={isShortcutsOpen}
         onClose={() => setIsShortcutsOpen(false)}
+      />
+
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        currentTheme={theme}
+        onThemeChange={(newTheme) => setTheme(newTheme)}
       />
 
       <CodeSnippetModal

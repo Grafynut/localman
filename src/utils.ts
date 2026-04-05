@@ -1,4 +1,4 @@
-import type { BodyViewMode, FormDataEntry, KeyValuePair } from "./types";
+import type { BodyViewMode, FormDataEntry, KeyValuePair, AuthConfig } from "./types";
 
 export function generateId() {
   return Math.random().toString(36).substring(2, 9);
@@ -96,6 +96,15 @@ export function headerRowsToObject(rows: KeyValuePair[]) {
   return out;
 }
 
+export function formDataRowsToEntries(rows: FormDataEntry[]) {
+  return rows.map((row) => ({
+    key: row.key,
+    value: row.value,
+    type: row.type,
+    enabled: row.enabled,
+  }));
+}
+
 export function formatResponseBody(rawBody: string, mode: BodyViewMode) {
   if (mode === "raw" || mode === "preview") {
     return rawBody;
@@ -185,6 +194,28 @@ export function resolveVariables(text: string, env: Record<string, string>): str
     
     return env[trimmedKey] !== undefined ? env[trimmedKey] : match;
   });
+}
+
+export function resolveAuthVariables(auth: AuthConfig, context: Record<string, string>): AuthConfig {
+  if (!auth || auth.type === "none") return auth;
+  const resolved = { ...auth };
+  if (resolved.bearer && resolved.bearer.token) {
+    resolved.bearer = { token: resolveVariables(resolved.bearer.token, context) };
+  }
+  if (resolved.basic) {
+    resolved.basic = {
+      username: resolveVariables(resolved.basic.username || "", context),
+      password: resolveVariables(resolved.basic.password || "", context),
+    };
+  }
+  if (resolved.apikey) {
+    resolved.apikey = {
+      ...resolved.apikey,
+      key: resolveVariables(resolved.apikey.key || "", context),
+      value: resolveVariables(resolved.apikey.value || "", context),
+    };
+  }
+  return resolved;
 }
 
 export function parseCurl(curl: string): Record<string, any> {

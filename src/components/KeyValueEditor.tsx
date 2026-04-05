@@ -9,9 +9,10 @@ type Props = {
   setItems: Dispatch<SetStateAction<KeyValuePair[]>>;
   environments: Environment[];
   activeEnvId: string | null;
+  globals?: Record<string, string>;
 };
 
-export function KeyValueEditor({ items, setItems, environments, activeEnvId }: Props) {
+export function KeyValueEditor({ items, setItems, environments, activeEnvId, globals = {} }: Props) {
   const updateItem = (
     index: number,
     field: keyof KeyValuePair,
@@ -66,11 +67,15 @@ export function KeyValueEditor({ items, setItems, environments, activeEnvId }: P
                 ) : null}
               </td>
               <td className="w-12 border-r border-border align-middle p-0">
-                <input
+                <VariableInput
                   value={item.key}
-                  onChange={(e) => updateItem(index, "key", e.target.value)}
+                  onChange={(val) => updateItem(index, "key", val)}
                   placeholder="Key"
                   className="w-full bg-transparent px-3 py-2 text-[12px] text-gray-100 placeholder-muted/30 focus:outline-none focus:bg-primary/5 font-bold transition-all"
+                  environments={environments}
+                  activeEnvId={activeEnvId}
+                  globals={globals}
+                  isSensitive={item.isSensitive}
                 />
               </td>
               <td className="border-r border-border align-middle p-0">
@@ -80,6 +85,8 @@ export function KeyValueEditor({ items, setItems, environments, activeEnvId }: P
                   placeholder="Value"
                   environments={environments}
                   activeEnvId={activeEnvId}
+                  globals={globals}
+                  isSensitive={item.isSensitive}
                   className="w-full bg-transparent px-3 py-2 text-[12px] text-primary/90 placeholder-muted/30 focus:outline-none focus:bg-primary/5 font-mono selection:bg-primary/30 transition-all"
                 />
               </td>
@@ -90,6 +97,7 @@ export function KeyValueEditor({ items, setItems, environments, activeEnvId }: P
                   placeholder="Description"
                   environments={environments}
                   activeEnvId={activeEnvId}
+                  globals={globals}
                   className="w-full bg-transparent px-3 py-2 text-[12px] text-muted placeholder-muted/20 focus:outline-none focus:bg-primary/5 transition-all italic"
                 />
               </td>

@@ -76,6 +76,7 @@ pub fn init_db(
             body_type TEXT DEFAULT 'raw',
             form_data TEXT,
             binary_file_path TEXT,
+            auth TEXT,
             FOREIGN KEY(collection_id) REFERENCES collections(id),
             FOREIGN KEY(folder_id) REFERENCES folders(id)
         );
@@ -144,6 +145,10 @@ pub fn init_db(
     );
     let _ = conn.execute(
         "ALTER TABLE requests ADD COLUMN binary_file_path TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE requests ADD COLUMN auth TEXT",
         [],
     );
     let _ = conn.execute(
@@ -256,6 +261,7 @@ pub struct StoredRequest {
     pub body_type: Option<String>,
     pub form_data: Option<String>,
     pub binary_file_path: Option<String>,
+    pub auth: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -293,7 +299,7 @@ fn fetch_collection_by_id(conn: &Connection, id: &str) -> std::result::Result<Co
 fn fetch_request_by_id(conn: &Connection, id: &str) -> std::result::Result<StoredRequest, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path
+            "SELECT id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth
              FROM requests
              WHERE id = ?1",
         )
@@ -315,6 +321,7 @@ fn fetch_request_by_id(conn: &Connection, id: &str) -> std::result::Result<Store
             body_type: row.get(11).ok(),
             form_data: row.get(12).ok(),
             binary_file_path: row.get(13).ok(),
+            auth: row.get(14).ok(),
         })
     } else {
         Err("Request not found".to_string())
@@ -527,7 +534,7 @@ pub fn duplicate_collection(
 
         let mut stmt = conn
             .prepare(
-                "SELECT name, method, url, headers, body, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path
+                "SELECT name, method, url, headers, body, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth
                  FROM requests
                  WHERE collection_id = ?1",
             )
@@ -541,23 +548,24 @@ pub fn duplicate_collection(
                     row.get::<_, Option<String>>(3).ok().flatten(),
                     row.get::<_, Option<String>>(4).ok().flatten(),
                     row.get::<_, Option<String>>(5).ok().flatten(),
-                    row.get::<_, Option<String>>(6).unwrap_or_default(),
+                    row.get::<_, i32>(6).unwrap_or_default(),
                     row.get::<_, Option<String>>(7).ok().flatten(),
                     row.get::<_, Option<String>>(8).ok().flatten(),
                     row.get::<_, Option<String>>(9).ok().flatten(),
                     row.get::<_, Option<String>>(10).ok().flatten(),
                     row.get::<_, Option<String>>(11).ok().flatten(),
+                    row.get::<_, Option<String>>(12).ok().flatten(),
                 ))
             })
             .map_err(|e| e.to_string())?;
 
         for req in req_iter {
-            if let Ok((name, method, url, headers, body, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path)) = req {
+            if let Ok((name, method, url, headers, body, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth)) = req {
                 let cloned_id = uuid::Uuid::new_v4().to_string();
                 conn.execute(
-                    "INSERT INTO requests (id, collection_id, name, method, url, headers, body, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-                    (&cloned_id, &new_id, &name, &method, &url, &headers, &body, &folder_id, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path),
+                    "INSERT INTO requests (id, collection_id, name, method, url, headers, body, folder_id, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                    (&cloned_id, &new_id, &name, &method, &url, &headers, &body, &folder_id, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path, &auth),
                 )
                 .map_err(|e| e.to_string())?;
             }
@@ -586,12 +594,13 @@ pub fn create_request(
     body_type: Option<String>,
     form_data: Option<String>,
     binary_file_path: Option<String>,
+    auth: Option<String>,
 ) -> std::result::Result<StoredRequest, String> {
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         conn.execute(
-            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-            (&id, &collection_id, &folder_id, &name, &method, &url, &headers, &body, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path),
+            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            (&id, &collection_id, &folder_id, &name, &method, &url, &headers, &body, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path, &auth),
         ).map_err(|e| e.to_string())?;
 
         fetch_request_by_id(conn, &id)
@@ -840,7 +849,7 @@ pub fn duplicate_folder(
         ).map_err(|e| e.to_string())?;
 
         let mut stmt = conn
-            .prepare("SELECT name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path FROM requests WHERE folder_id = ?1")
+            .prepare("SELECT name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth FROM requests WHERE folder_id = ?1")
             .map_err(|e| e.to_string())?;
         
         let req_iter = stmt.query_map([&source_id], |row| {
@@ -856,16 +865,17 @@ pub fn duplicate_folder(
                 row.get::<_, Option<String>>(8)?,
                 row.get::<_, Option<String>>(9)?,
                 row.get::<_, Option<String>>(10)?,
+                row.get::<_, Option<String>>(11)?,
             ))
         }).map_err(|e| e.to_string())?;
 
         for req in req_iter {
-            if let Ok((name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path)) = req {
+            if let Ok((name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth)) = req {
                 let cloned_req_id = uuid::Uuid::new_v4().to_string();
                 conn.execute(
-                    "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-                    (&cloned_req_id, &source.collection_id, Some(&new_id), &name, &method, &url, &headers, &body, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path),
+                    "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                    (&cloned_req_id, &source.collection_id, Some(&new_id), &name, &method, &url, &headers, &body, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path, &auth),
                 ).map_err(|e| e.to_string())?;
             }
         }
@@ -929,15 +939,16 @@ pub fn update_request(
     body_type: Option<String>,
     form_data: Option<String>,
     binary_file_path: Option<String>,
+    auth: Option<String>,
 ) -> std::result::Result<StoredRequest, String> {
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         let affected = conn
             .execute(
                 "UPDATE requests
-                 SET name = ?2, method = ?3, url = ?4, headers = ?5, body = ?6, pre_request_script = ?7, post_request_script = ?8, body_type = ?9, form_data = ?10, binary_file_path = ?11
+                 SET name = ?2, method = ?3, url = ?4, headers = ?5, body = ?6, pre_request_script = ?7, post_request_script = ?8, body_type = ?9, form_data = ?10, binary_file_path = ?11, auth = ?12
                  WHERE id = ?1",
-                (&id, &name, &method, &url, &headers, &body, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path),
+                (&id, &name, &method, &url, &headers, &body, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path, &auth),
             )
             .map_err(|e| e.to_string())?;
 
@@ -968,12 +979,13 @@ pub fn upsert_request(
     body_type: Option<String>,
     form_data: Option<String>,
     binary_file_path: Option<String>,
+    auth: Option<String>,
 ) -> std::result::Result<StoredRequest, String> {
     let lock = state.db.lock().map_err(|e| e.to_string())?;
     if let Some(conn) = lock.as_ref() {
         conn.execute(
-            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
              ON CONFLICT(id) DO UPDATE SET
                collection_id = excluded.collection_id,
                folder_id = excluded.folder_id,
@@ -987,8 +999,9 @@ pub fn upsert_request(
                post_request_script = excluded.post_request_script,
                body_type = excluded.body_type,
                form_data = excluded.form_data,
-               binary_file_path = excluded.binary_file_path",
-            (&id, &collection_id, &folder_id, &name, &method, &url, &headers, &body, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path),
+               binary_file_path = excluded.binary_file_path,
+               auth = excluded.auth",
+            (&id, &collection_id, &folder_id, &name, &method, &url, &headers, &body, &position, &pre_request_script, &post_request_script, &body_type, &form_data, &binary_file_path, &auth),
         )
         .map_err(|e| e.to_string())?;
 
@@ -1048,8 +1061,8 @@ pub fn duplicate_request(
     if let Some(conn) = lock.as_ref() {
         let source = fetch_request_by_id(conn, &source_id)?;
         conn.execute(
-            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            "INSERT INTO requests (id, collection_id, folder_id, name, method, url, headers, body, position, pre_request_script, post_request_script, body_type, form_data, binary_file_path, auth)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             (
                 &new_id,
                 &source.collection_id,
@@ -1065,6 +1078,7 @@ pub fn duplicate_request(
                 &source.body_type,
                 &source.form_data,
                 &source.binary_file_path,
+                &source.auth,
             ),
         )
         .map_err(|e| e.to_string())?;
@@ -1108,6 +1122,7 @@ pub fn get_requests_by_collection(
                     body_type: row.get(11).ok(),
                     form_data: row.get(12).ok(),
                     binary_file_path: row.get(13).ok(),
+                    auth: row.get(14).ok(),
                 })
             })
             .map_err(|e| e.to_string())?;

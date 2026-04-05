@@ -39,6 +39,20 @@ export type StoredRequest = {
   body_type?: string | null;
   form_data?: string | null;
   binary_file_path?: string | null;
+  auth?: string | null;
+};
+
+export type AuthType = "none" | "bearer" | "basic" | "apikey";
+
+export type AuthConfig = {
+  type: AuthType;
+  bearer?: { token: string };
+  basic?: { username: string; password: string };
+  apikey?: { key: string; value: string; addTo: "header" | "query" };
+};
+
+export const defaultAuthConfig: AuthConfig = {
+  type: "none"
 };
 
 export type KeyValuePair = {
@@ -46,6 +60,7 @@ export type KeyValuePair = {
   key: string;
   value: string;
   enabled: boolean;
+  isSensitive?: boolean;
   description?: string;
 };
 
@@ -55,6 +70,7 @@ export type FormDataEntry = {
   value: string;
   type: "text" | "file";
   enabled: boolean;
+  isSensitive?: boolean;
 };
 
 export type TabState = {
@@ -72,6 +88,7 @@ export type TabState = {
   bodyType: "none" | "raw" | "form-data" | "binary";
   formData: FormDataEntry[];
   binaryFilePath: string | null;
+  auth: AuthConfig;
   lastResponse?: ResponseState;
   lastRespTab?: ResponseTab;
   wsMessages?: WsMessage[];
@@ -122,7 +139,7 @@ export type WsStatus = {
 };
 
 export type SyncAction = "Create" | "Update" | "Delete" | "Metadata" | "RequestAccess" | "GrantAccess" | "DenyAccess";
-export type SyncEntityType = "Collection" | "Folder" | "Request" | "PeerMetadata" | "Global";
+export type SyncEntityType = "Collection" | "Folder" | "Request" | "PeerMetadata" | "Global" | "Workspace";
 
 export type SyncEvent = {
   event_id: string;
