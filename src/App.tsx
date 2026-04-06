@@ -42,6 +42,8 @@ import {
   parseCurl,
   parsePostman,
   parseOpenAPI,
+  prepareExportData,
+  validateWorkspaceData,
 } from "./utils";
 import { EnvironmentManager } from "./components/EnvironmentManager";
 import { ImportModal } from "./components/ImportModal";
@@ -279,16 +281,11 @@ function App() {
 
   async function handleExportWorkspace() {
     try {
-      const workspaceData = {
-        collections,
-        folders: foldersByCollection,
-        requests: requestsByCollection,
-        environments,
-      };
-
+      const workspaceData = prepareExportData(collections, foldersByCollection, requestsByCollection, environments);
+      
       const path = await save({
         filters: [{
-          name: 'Workspace JSON',
+          name: 'Localman Workspace',
           extensions: ['json']
         }],
         defaultPath: "localman-workspace.json"
@@ -313,11 +310,137 @@ function App() {
     }
   }
 
+  async function handleExportCollection(collection: Collection) {
+    try {
+      const exportData = prepareExportData(collections, foldersByCollection, requestsByCollection, [], { collectionId: collection.id });
+      
+      const path = await save({
+        filters: [{
+          name: 'Localman Collection',
+          extensions: ['json']
+        }],
+        defaultPath: `${collection.name.toLowerCase().replace(/\s+/g, '-')}.localman.json`
+      });
+
+      if (!path) return;
+
+      await writeTextFile(path, JSON.stringify(exportData, null, 2));
+
+      showToast({
+        kind: "success",
+        title: "Collection Exported",
+        description: `Successfully exported "${collection.name}"`,
+      });
+    } catch (err) {
+      showToast({ kind: "error", title: "Export Failed", description: String(err) });
+    }
+  }
+
+  async function handleExportFolder(folder: Folder) {
+    try {
+      const exportData = prepareExportData(collections, foldersByCollection, requestsByCollection, [], { 
+        collectionId: folder.collection_id, 
+        folderId: folder.id 
+      });
+      
+      const path = await save({
+        filters: [{
+          name: 'Localman Folder',
+          extensions: ['json']
+        }],
+        defaultPath: `${folder.name.toLowerCase().replace(/\s+/g, '-')}.localman.json`
+      });
+
+      if (!path) return;
+
+      await writeTextFile(path, JSON.stringify(exportData, null, 2));
+
+      showToast({
+        kind: "success",
+        title: "Folder Exported",
+        description: `Successfully exported "${folder.name}"`,
+      });
+    } catch (err) {
+      showToast({ kind: "error", title: "Export Failed", description: String(err) });
+    }
+  }
+
+  async function mergeLocalmanData(parsed: any) {
+    if (!validateWorkspaceData(parsed)) {
+      throw new Error("Invalid workspace file format");
+    }
+
+    try {
+      // Import Collections
+      for (const col of (parsed.collections || [])) {
+        await invoke("upsert_collection", {
+          id: col.id,
+          name: col.name,
+          ownerId: col.owner_id || LOCAL_USER_ID,
+          description: col.description,
+          workspaceId: activeWorkspaceId,
+          position: col.position || collections.length
+        });
+      }
+
+      // Import Folders
+      for (const [colId, folders] of Object.entries(parsed.folders || {})) {
+        for (const folder of (folders as any[])) {
+          await invoke("upsert_folder", {
+            id: folder.id,
+            collectionId: colId,
+            name: folder.name,
+            description: folder.description,
+            position: folder.position || 0
+          });
+        }
+      }
+
+      // Import Requests
+      for (const [colId, requests] of Object.entries(parsed.requests || {})) {
+        for (const req of (requests as any[])) {
+          await invoke("upsert_request", {
+            id: req.id,
+            collectionId: colId,
+            folderId: req.folder_id,
+            name: req.name,
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            body: req.body,
+            description: req.description,
+            position: req.position || 0,
+            preRequestScript: req.pre_request_script,
+            postRequestScript: req.post_request_script,
+            bodyType: req.body_type,
+            formData: req.form_data,
+            binaryFilePath: req.binary_file_path,
+            auth: req.auth,
+            params: req.params,
+          });
+        }
+      }
+
+      // Import Environments
+      for (const env of (parsed.environments || [])) {
+        if (!environments.some(e => e.id === env.id)) {
+          await invoke("create_environment", { ...env, workspace_id: activeWorkspaceId, workspaceId: activeWorkspaceId, isActive: false, is_active: false });
+        }
+      }
+
+      await fetchCollections(activeWorkspaceId);
+      await fetchEnvironments(activeWorkspaceId);
+    } catch (err) {
+      console.error("Merge error:", err);
+      throw err;
+    }
+  }
+
   async function handleImportWorkspace() {
     try {
       const path = await open({
         filters: [{
-          name: 'Workspace JSON',
+          name: 'Localman Workspace',
           extensions: ['json']
         }],
         multiple: false,
@@ -328,59 +451,19 @@ function App() {
       const contents = await readTextFile(path as string);
       const parsed = JSON.parse(contents);
 
-      if (!parsed.collections) {
-        throw new Error("Invalid workspace file format");
-      }
-
       openConfirm({
         title: "Import Workspace",
-        description: "This will merge the imported collections, folders, requests, and environments into your current workspace. Do you want to proceed?",
+        description: "This will merge the imported collections, folders, and requests into your current workspace. Proceed?",
         confirmLabel: "Import",
         onConfirm: async () => {
           try {
-            // Import Collections
-            for (const col of (parsed.collections || [])) {
-              if (!collections.some(c => c.id === col.id)) {
-                await invoke("create_collection", {
-                  ...col,
-                  workspaceId: activeWorkspaceId,
-                  workspace_id: activeWorkspaceId,
-                  position: collections.length
-                });
-              }
-            }
-
-            // Import Folders
-            for (const [colId, folders] of Object.entries(parsed.folders || {})) {
-              for (const folder of (folders as any[])) {
-                await invoke("create_folder", { ...folder, collectionId: colId });
-              }
-            }
-
-            // Import Requests
-            for (const [colId, requests] of Object.entries(parsed.requests || {})) {
-              for (const req of (requests as any[])) {
-                await invoke("create_request", { ...req, collectionId: colId, collection_id: colId });
-              }
-            }
-
-            // Import Environments
-            for (const env of (parsed.environments || [])) {
-              if (!environments.some(e => e.id === env.id)) {
-                await invoke("create_environment", { ...env, workspaceId: activeWorkspaceId, workspace_id: activeWorkspaceId, isActive: false, is_active: false });
-              }
-            }
-
-            await fetchCollections(activeWorkspaceId);
-            await fetchEnvironments(activeWorkspaceId);
-
+            await mergeLocalmanData(parsed);
             showToast({
               kind: "success",
               title: "Workspace Imported",
               description: "Successfully merged imported data.",
             });
           } catch (importErr) {
-            console.error("Import merge error:", importErr);
             showToast({
               kind: "error",
               title: "Import Failed",
@@ -390,12 +473,7 @@ function App() {
         }
       });
     } catch (err) {
-      console.error("Failed to import workspace:", err);
-      showToast({
-        kind: "error",
-        title: "Import Failed",
-        description: String(err),
-      });
+      showToast({ kind: "error", title: "Import Failed", description: String(err) });
     }
   }
 
@@ -3471,6 +3549,8 @@ function App() {
                 onHistory={() => setIsHistoryOpen(true)}
                 onRunCollection={handleRunCollection}
                 onRunFolder={handleRunFolder}
+                onExportCollection={handleExportCollection}
+                onExportFolder={handleExportFolder}
               />
             </div>
             <div
@@ -3667,6 +3747,23 @@ function App() {
         onImportCurl={handleImportCurl}
         onImportPostman={handleImportPostman}
         onImportOpenAPI={handleImportOpenAPI}
+        onImportWorkspace={(json) => {
+          openConfirm({
+            title: "Import Workspace",
+            description: "This will merge the imported collections, folders, and requests into your current workspace. Proceed?",
+            confirmLabel: "Import",
+            onConfirm: async () => {
+              try {
+                // Reuse existing import logic but with more validation if needed
+                // For now, call the core merge logic
+                await mergeLocalmanData(json);
+                showToast({ kind: "success", title: "Import Successful", description: "Workspace data merged." });
+              } catch (err) {
+                showToast({ kind: "error", title: "Import Failed", description: String(err) });
+              }
+            }
+          });
+        }}
       />
 
       <HistoryPanel

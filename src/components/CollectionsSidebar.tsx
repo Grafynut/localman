@@ -60,6 +60,8 @@ type Props = {
   onRunCollection: (collection: Collection) => void;
   onRunFolder: (folder: Folder) => void;
   onShareCollection: (collectionId: string) => void;
+  onExportCollection?: (collection: Collection) => void;
+  onExportFolder?: (folder: Folder) => void;
   peersCount: number;
   peers: Record<string, string>;
   peerCollections: Record<string, Array<{ id: string, name: string, owner_id: string, workspace_id: string }>>;
@@ -81,6 +83,7 @@ interface CollectionHeaderProps {
   onDuplicate: () => void;
   onDelete: () => void;
   onShare: () => void;
+  onExport?: () => void;
   peersCount: number;
   setMenuId: (id: string | null) => void;
   isOpen: boolean;
@@ -97,6 +100,7 @@ function CollectionHeader({
   onDuplicate,
   onDelete,
   onShare,
+  onExport,
   peersCount,
   setMenuId,
   isOpen,
@@ -172,6 +176,12 @@ function CollectionHeader({
                 <span>Share with Peers</span>
               </button>
             )}
+            <button
+              onClick={() => { setMenuId(null); onExport?.(); }}
+              className="w-full px-3 py-1.5 text-left text-[11px] hover:bg-white/5"
+            >
+              Export JSON
+            </button>
             <div className="h-px bg-border my-1" />
             <button
               onClick={() => { setMenuId(null); onDelete(); }}
@@ -199,6 +209,7 @@ interface FolderItemProps {
   onDuplicateFolder: (f: Folder) => void;
   onDeleteFolder: (f: Folder) => void;
   onRunFolder: (f: Folder) => void;
+  onExportFolder?: (f: Folder) => void;
   openFolderMenuId: string | null;
   setOpenFolderMenuId: (id: string | null) => void;
   openRequestMenuId: string | null;
@@ -224,6 +235,7 @@ function FolderItem({
   onDuplicateFolder,
   onDeleteFolder,
   onRunFolder,
+  onExportFolder,
   openFolderMenuId,
   setOpenFolderMenuId,
   openRequestMenuId,
@@ -308,20 +320,29 @@ function FolderItem({
                 <button
                   onClick={() => {
                     setOpenFolderMenuId(null);
-                    onRenameFolder(folder);
-                  }}
-                  className="w-full px-2 py-1.5 text-left text-[11px] hover:bg-white/5"
-                >
-                  Rename
-                </button>
-                <button
-                  onClick={() => {
-                    setOpenFolderMenuId(null);
                     onDuplicateFolder(folder);
                   }}
                   className="w-full px-2 py-1.5 text-left text-[11px] hover:bg-white/5"
                 >
                   Duplicate
+                </button>
+                <button
+                  onClick={() => {
+                    setOpenFolderMenuId(null);
+                    onExportFolder?.(folder);
+                  }}
+                  className="w-full px-2 py-1.5 text-left text-[11px] hover:bg-white/5"
+                >
+                  Export Folder
+                </button>
+                <button
+                  onClick={() => {
+                    setOpenFolderMenuId(null);
+                    onRenameFolder(folder);
+                  }}
+                  className="w-full px-2 py-1.5 text-left text-[11px] hover:bg-white/5"
+                >
+                  Rename
                 </button>
                 <button
                   onClick={() => {
@@ -549,6 +570,8 @@ export function CollectionsSidebar({
   onRunCollection,
   onRunFolder,
   onShareCollection,
+  onExportCollection,
+  onExportFolder,
   peersCount,
   peers,
   peerCollections,
@@ -795,6 +818,7 @@ export function CollectionsSidebar({
                           onDuplicate={() => onDuplicateCollection(collection)}
                           onDelete={() => onDeleteCollection(collection)}
                           onShare={() => onShareCollection(collection.id)}
+                          onExport={() => onExportCollection?.(collection)}
                           peersCount={peersCount}
                           setMenuId={setOpenCollectionMenuId}
                           isOpen={openCollectionMenuId === collection.id}
@@ -819,6 +843,7 @@ export function CollectionsSidebar({
                                   onDuplicateFolder={onDuplicateFolder}
                                   onDeleteFolder={onDeleteFolder}
                                   onRunFolder={onRunFolder}
+                                  onExportFolder={onExportFolder}
                                   openFolderMenuId={openFolderMenuId}
                                   setOpenFolderMenuId={setOpenFolderMenuId}
                                   openRequestMenuId={openRequestMenuId}

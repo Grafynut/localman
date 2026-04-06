@@ -349,6 +349,50 @@ export function parseCurl(curl: string): Record<string, any> {
   return result;
 }
 
+export function validateWorkspaceData(data: any): boolean {
+  if (!data || typeof data !== "object") return false;
+  
+  // Basic check for Localman workspace format
+  const hasCollections = Array.isArray(data.collections);
+  const hasFolders = data.folders && typeof data.folders === "object";
+  const hasRequests = data.requests && typeof data.requests === "object";
+  
+  return hasCollections && hasFolders && hasRequests;
+}
+
+export function prepareExportData(
+  allCollections: Collection[],
+  allFolders: Record<string, Folder[]>,
+  allRequests: Record<string, StoredRequest[]>,
+  environments: any[],
+  filter?: { collectionId?: string; folderId?: string }
+) {
+  let exportCollections = allCollections;
+  let exportFolders = allFolders;
+  let exportRequests = allRequests;
+
+  if (filter?.collectionId) {
+    exportCollections = allCollections.filter(c => c.id === filter.collectionId);
+    exportFolders = { [filter.collectionId]: allFolders[filter.collectionId] || [] };
+    exportRequests = { [filter.collectionId]: allRequests[filter.collectionId] || [] };
+    
+    if (filter.folderId) {
+      // If filtering by folder, we still export the collection but only including that folder and its requests
+      exportFolders[filter.collectionId] = exportFolders[filter.collectionId].filter(f => f.id === filter.folderId);
+      exportRequests[filter.collectionId] = exportRequests[filter.collectionId].filter(r => r.folder_id === filter.folderId);
+    }
+  }
+
+  return {
+    version: "1.0.0",
+    timestamp: new Date().toISOString(),
+    collections: exportCollections,
+    folders: exportFolders,
+    requests: exportRequests,
+    environments: filter?.collectionId ? [] : environments, // Only export environments for full workspace export
+  };
+}
+
 export function parsePostman(json: any) {
   const collections: any[] = [];
   const folders: any[] = [];

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Upload, Terminal, FileJson, AlertCircle, CheckCircle2, Globe } from "lucide-react";
+import { X, Upload, Terminal, FileJson, AlertCircle, CheckCircle2, Globe, Monitor } from "lucide-react";
 import yaml from "js-yaml";
 
 type Props = {
@@ -8,14 +8,16 @@ type Props = {
   onImportCurl: (curl: string) => void;
   onImportPostman: (json: any) => void;
   onImportOpenAPI: (spec: any) => void;
+  onImportWorkspace: (json: any) => void;
 };
 
-export function ImportModal({ isOpen, onClose, onImportCurl, onImportPostman, onImportOpenAPI }: Props) {
-  const [activeTab, setActiveTab] = useState<"curl" | "postman" | "openapi">("curl");
+export function ImportModal({ isOpen, onClose, onImportCurl, onImportPostman, onImportOpenAPI, onImportWorkspace }: Props) {
+  const [activeTab, setActiveTab] = useState<"curl" | "postman" | "openapi" | "localman">("curl");
   const [inputText, setInputText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   // Reset state when modal opens
   useEffect(() => {
@@ -58,7 +60,7 @@ export function ImportModal({ isOpen, onClose, onImportCurl, onImportPostman, on
         onImportPostman(json);
         setSuccess(true);
         setTimeout(onClose, 800);
-      } else {
+      } else if (activeTab === "openapi") {
         // OpenAPI
         let spec: any;
         try {
@@ -78,6 +80,16 @@ export function ImportModal({ isOpen, onClose, onImportCurl, onImportPostman, on
         }
         setIsImporting(true);
         onImportOpenAPI(spec);
+        setSuccess(true);
+        setTimeout(onClose, 800);
+      } else if (activeTab === "localman") {
+        const json = JSON.parse(inputText);
+        if (!json.collections || !json.requests) {
+          setError("Invalid Localman Workspace format.");
+          return;
+        }
+        setIsImporting(true);
+        onImportWorkspace(json);
         setSuccess(true);
         setTimeout(onClose, 800);
       }
@@ -100,6 +112,40 @@ export function ImportModal({ isOpen, onClose, onImportCurl, onImportPostman, on
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
+        setInputText(content);
+        if (file.name.endsWith(".json")) {
+          if (content.includes('"openapi"') || content.includes('"swagger"')) {
+            setActiveTab("openapi");
+          } else if (content.includes('"info"') && content.includes('"item"')) {
+            setActiveTab("postman");
+          } else if (content.includes('"collections"') && content.includes('"requests"')) {
+            setActiveTab("localman");
+          }
+        } else if (file.name.endsWith(".yaml") || file.name.endsWith(".yml")) {
+          setActiveTab("openapi");
+        }
+      };
+      reader.readAsText(file);
+    }
   };
 
   return (
@@ -150,10 +196,32 @@ export function ImportModal({ isOpen, onClose, onImportCurl, onImportPostman, on
             <Globe size={14} />
             <span>OpenAPI / Swagger</span>
           </button>
+          <button
+            onClick={() => setActiveTab("localman")}
+            className={`flex-1 flex items-center justify-center space-x-2 py-3 text-[12px] font-bold transition-all border-b-2 ${
+              activeTab === "localman" ? "border-primary text-primary" : "border-transparent text-muted hover:text-gray-300"
+            }`}
+          >
+            <Monitor size={14} />
+            <span>Localman Workspace</span>
+          </button>
         </div>
 
-        <div className="p-6 flex-1 flex flex-col space-y-4">
-          <div className="flex-1 min-h-[240px] flex flex-col space-y-2">
+        <div 
+          className="p-6 flex-1 flex flex-col space-y-4"
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          <div className="flex-1 min-h-[240px] flex flex-col space-y-2 relative">
+            {isDragging && (
+              <div className="absolute inset-0 z-10 bg-primary/10 border-2 border-dashed border-primary rounded-lg flex items-center justify-center backdrop-blur-[2px] animate-in fade-in duration-200">
+                <div className="flex flex-col items-center space-y-2 text-primary">
+                  <Upload size={32} className="animate-bounce" />
+                  <span className="font-bold text-[14px]">Drop file to import</span>
+                </div>
+              </div>
+            )}
             <label className="text-[11px] font-black uppercase tracking-widest text-muted ml-1">
               {activeTab === "curl" ? "Paste cURL Command" : "Paste Collection JSON or Upload File"}
             </label>
@@ -163,6 +231,7 @@ export function ImportModal({ isOpen, onClose, onImportCurl, onImportPostman, on
               placeholder={
                 activeTab === "curl" ? "curl -X POST https://api.example.com..." : 
                 activeTab === "postman" ? '{\n  "info": { "name": "My Collection", ... },\n  "item": [ ... ]\n}' :
+                activeTab === "localman" ? '{\n  "version": "1.0.0",\n  "collections": [ ... ],\n  "requests": { ... }\n}' :
                 'openapi: 3.0.0\ninfo:\n  title: My API\n...'
               }
               className="flex-1 w-full bg-[#1a1a1a] border border-border rounded-lg px-4 py-3 text-[13px] font-mono text-gray-300 focus:outline-none focus:border-primary/50 transition-all resize-none"
