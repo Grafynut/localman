@@ -485,16 +485,36 @@ pub fn delete_collection(
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> std::result::Result<(), String> {
-    let lock = state.db.lock().map_err(|e| e.to_string())?;
-    if let Some(conn) = lock.as_ref() {
-        conn.execute("DELETE FROM requests WHERE collection_id = ?1", [&id])
+    let mut lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_mut() {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        
+        // 1. Delete requests
+        tx.execute("DELETE FROM requests WHERE collection_id = ?1", [&id])
             .map_err(|e| e.to_string())?;
-        let affected = conn
+            
+        // 2. Delete folders
+        tx.execute("DELETE FROM folders WHERE collection_id = ?1", [&id])
+            .map_err(|e| e.to_string())?;
+            
+        // 3. Delete collection members
+        tx.execute("DELETE FROM collection_members WHERE collection_id = ?1", [&id])
+            .map_err(|e| e.to_string())?;
+            
+        // 4. Delete environments
+        tx.execute("DELETE FROM environments WHERE collection_id = ?1", [&id])
+            .map_err(|e| e.to_string())?;
+            
+        // 5. Delete the collection itself
+        let affected = tx
             .execute("DELETE FROM collections WHERE id = ?1", [&id])
             .map_err(|e| e.to_string())?;
+            
         if affected == 0 {
             return Err("Collection not found".to_string());
         }
+        
+        tx.commit().map_err(|e| e.to_string())?;
         Ok(())
     } else {
         Err("Database not initialized".to_string())
@@ -850,12 +870,19 @@ pub fn delete_folder(
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> std::result::Result<(), String> {
-    let lock = state.db.lock().map_err(|e| e.to_string())?;
-    if let Some(conn) = lock.as_ref() {
-        conn.execute("DELETE FROM requests WHERE folder_id = ?1", [&id])
+    let mut lock = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(conn) = lock.as_mut() {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        
+        // 1. Delete requests inside the folder
+        tx.execute("DELETE FROM requests WHERE folder_id = ?1", [&id])
             .map_err(|e| e.to_string())?;
-        conn.execute("DELETE FROM folders WHERE id = ?1", [&id])
+            
+        // 2. Delete the folder itself
+        tx.execute("DELETE FROM folders WHERE id = ?1", [&id])
             .map_err(|e| e.to_string())?;
+            
+        tx.commit().map_err(|e| e.to_string())?;
         Ok(())
     } else {
         Err("Database not initialized".to_string())
