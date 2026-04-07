@@ -1,6 +1,7 @@
 import { X, Plus } from "lucide-react";
 import type { TabState } from "../types";
 import { methodColor } from "../utils";
+import { PresenceIndicator } from "./PresenceIndicator";
 
 interface RequestTabsProps {
   tabs: TabState[];
@@ -8,6 +9,7 @@ interface RequestTabsProps {
   onTabSelect: (tabId: string) => void;
   onTabClose: (tabId: string, e: React.MouseEvent) => void;
   onNewTab: () => void;
+  peerPresence?: Record<string, { requestId: string | null }>;
 }
 
 export function RequestTabs({
@@ -16,6 +18,7 @@ export function RequestTabs({
   onTabSelect,
   onTabClose,
   onNewTab,
+  peerPresence = {},
 }: RequestTabsProps) {
   return (
     <div className="flex items-center h-[34px] bg-[#1a1a1a] border-b border-border overflow-x-auto overflow-y-hidden custom-scrollbar shrink-0">
@@ -40,6 +43,16 @@ export function RequestTabs({
             >
               {tab.name}
             </span>
+
+            {/* Presence Indicators */}
+            <div className="ml-2">
+              <PresenceIndicator 
+                peers={Object.entries(peerPresence)
+                  .filter(([_, p]) => p.requestId === tab.requestId)
+                  .map(([name]) => name)}
+                size={14}
+              />
+            </div>
 
             {/* Close Button / Dirty Indicator */}
             <div className="absolute right-2 flex items-center justify-center w-4 h-4">

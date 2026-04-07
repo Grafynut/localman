@@ -145,7 +145,7 @@ export type WsStatus = {
 };
 
 export type SyncAction = "Create" | "Update" | "Delete" | "Metadata" | "RequestAccess" | "GrantAccess" | "DenyAccess";
-export type SyncEntityType = "Collection" | "Folder" | "Request" | "PeerMetadata" | "Global" | "Workspace";
+export type SyncEntityType = "Collection" | "Folder" | "Request" | "PeerMetadata" | "Global" | "Workspace" | "Presence";
 
 export type SyncEvent = {
   event_id: string;

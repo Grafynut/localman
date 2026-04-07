@@ -59,6 +59,8 @@ import { executeScript } from "./utils/sandbox";
 import { Play } from "lucide-react";
 import { SettingsModal, type ThemeId } from "./components/SettingsModal";
 import { CookieManagerModal } from "./components/CookieManagerModal";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 
 function App() {
   const LOCAL_USER_ID = "local_user_1";
@@ -136,6 +138,18 @@ function App() {
 
     return () => clearTimeout(timer);
   }, [globals, peers]);
+
+  const [peerPresence, setPeerPresence] = useState<Record<string, { requestId: string | null }>>({});
+
+  // Broadcast Presence (Live Share)
+  useEffect(() => {
+    if (Object.keys(peers).length === 0) return;
+    
+    const activeTab = openTabs.find(t => t.id === activeTabId);
+    const requestId = activeTab?.requestId || null;
+
+    void broadcastSyncEvent("Metadata", "Presence", localDeviceId, { requestId }, true);
+  }, [activeTabId, openTabs, peers]);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [isInspectorVisible, setIsInspectorVisible] = useState(true);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -474,6 +488,36 @@ function App() {
       });
     } catch (err) {
       showToast({ kind: "error", title: "Import Failed", description: String(err) });
+    }
+  }
+
+  async function handleCheckUpdate() {
+    try {
+      const update = await check();
+      if (update) {
+        openConfirm({
+          title: "Update Available",
+          description: `Version ${update.version} is available. Download and install now?`,
+          confirmLabel: "Update",
+          onConfirm: async () => {
+            try {
+              showToast({ kind: "info", title: "Downloading Update", description: "Please wait..." });
+              await update.downloadAndInstall((event) => {
+                if (event.event === 'Finished') {
+                  showToast({ kind: "success", title: "Update Ready", description: "Restarting app..." });
+                  relaunch();
+                }
+              });
+            } catch (err) {
+              showToast({ kind: "error", title: "Update Failed", description: String(err) });
+            }
+          }
+        });
+      } else {
+        showToast({ kind: "info", title: "No Update Found", description: "You are on the latest version." });
+      }
+    } catch (err) {
+      showToast({ kind: "error", title: "Check Failed", description: String(err) });
     }
   }
 
@@ -1465,6 +1509,19 @@ function App() {
       } catch {
         payload = {};
       }
+    }
+
+    if (event.entity_type === "Presence") {
+      try {
+        const presenceData = JSON.parse(event.payload);
+        setPeerPresence(prev => ({
+          ...prev,
+          [event.origin_device]: presenceData
+        }));
+      } catch (err) {
+        console.error("Failed to parse presence payload", err);
+      }
+      return;
     }
 
     if (event.action === ("Metadata" as any)) {
@@ -3448,6 +3505,7 @@ function App() {
                 onCreateCollection={() => handleCreateCollectionClick()}
                 peerCollections={peerCollections}
                 peerWorkspaces={peerWorkspaces}
+                peerPresence={peerPresence}
                 peers={peers}
                 activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
                 onDownloadRequest={handleRequestDownload}
@@ -3570,6 +3628,7 @@ function App() {
               onTabSelect={handleTabSelect}
               onTabClose={handleTabClose}
               onNewTab={handleNewTab}
+              peerPresence={peerPresence}
             />
           )}
 
@@ -3783,6 +3842,7 @@ function App() {
         onClose={() => setIsSettingsOpen(false)}
         currentTheme={theme}
         onThemeChange={(newTheme) => setTheme(newTheme)}
+        onCheckUpdate={handleCheckUpdate}
       />
 
       <CodeSnippetModal

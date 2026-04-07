@@ -20,6 +20,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import type { Collection, Folder, StoredRequest, Workspace } from "../types";
 import { methodColor, methodBgColor } from "../utils";
+import { PresenceIndicator } from "./PresenceIndicator";
 
 type Props = {
   collections: Collection[];
@@ -70,6 +71,7 @@ type Props = {
   activeWorkspaceId?: string | null;
   activeWorkspaceName?: string;
   peerWorkspaces: Record<string, Workspace[]>;
+  peerPresence?: Record<string, { requestId: string | null }>;
 };
 
 interface CollectionHeaderProps {
@@ -220,6 +222,7 @@ interface FolderItemProps {
   onRenameRequest: (r: StoredRequest) => void;
   onDuplicateRequest: (r: StoredRequest) => void;
   onDeleteRequest: (r: StoredRequest) => void;
+  peerPresence?: Record<string, { requestId: string | null }>;
 }
 
 function FolderItem({
@@ -245,7 +248,8 @@ function FolderItem({
   onPasteRequest,
   onRenameRequest,
   onDuplicateRequest,
-  onDeleteRequest
+  onDeleteRequest,
+  peerPresence = {}
 }: FolderItemProps) {
   const {
     attributes,
@@ -380,6 +384,7 @@ function FolderItem({
                   onRenameRequest={onRenameRequest}
                   onDuplicateRequest={onDuplicateRequest}
                   onDeleteRequest={onDeleteRequest}
+                  peerPresence={peerPresence}
                 />
               ))
             )}
@@ -403,6 +408,7 @@ interface RequestItemProps {
   onRenameRequest: (r: StoredRequest) => void;
   onDuplicateRequest: (r: StoredRequest) => void;
   onDeleteRequest: (r: StoredRequest) => void;
+  peerPresence?: Record<string, { requestId: string | null }>;
 }
 
 function RequestItem({
@@ -417,7 +423,8 @@ function RequestItem({
   onPasteRequest,
   onRenameRequest,
   onDuplicateRequest,
-  onDeleteRequest
+  onDeleteRequest,
+  peerPresence = {}
 }: RequestItemProps) {
   const {
     attributes,
@@ -458,6 +465,13 @@ function RequestItem({
         <span className="truncate text-[12px]">
           {request.name}
         </span>
+        {/* Presence Indicator */}
+        <PresenceIndicator 
+           peers={Object.entries(peerPresence)
+             .filter(([_, p]: [string, any]) => p.requestId === request.id)
+             .map(([name]) => name)}
+           size={12}
+        />
         {activeRequestId === request.id && activeRequestIsDirty && (
           <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0"></div>
         )}
@@ -579,6 +593,7 @@ export function CollectionsSidebar({
   onHide,
   activeWorkspaceId,
   peerWorkspaces,
+  peerPresence = {}
 }: Props) {
   const [openCollectionMenuId, setOpenCollectionMenuId] = useState<string | null>(null);
   const [openFolderMenuId, setOpenFolderMenuId] = useState<string | null>(null);
@@ -854,6 +869,7 @@ export function CollectionsSidebar({
                                   onRenameRequest={onRenameRequest}
                                   onDuplicateRequest={onDuplicateRequest}
                                   onDeleteRequest={onDeleteRequest}
+                                  peerPresence={peerPresence}
                                 />
                               ))}
                             </SortableContext>
@@ -888,6 +904,7 @@ export function CollectionsSidebar({
                                     onRenameRequest={onRenameRequest}
                                     onDuplicateRequest={onDuplicateRequest}
                                     onDeleteRequest={onDeleteRequest}
+                                    peerPresence={peerPresence}
                                   />
                                 ))}
                               </SortableContext>

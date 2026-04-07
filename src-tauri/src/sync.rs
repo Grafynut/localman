@@ -19,6 +19,7 @@ pub enum EntityType {
     PeerMetadata,
     Global,
     Workspace,
+    Presence,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

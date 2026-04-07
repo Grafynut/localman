@@ -19,6 +19,8 @@ pub async fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // 1. Initialize DB and create tables
             let conn = db::init_db(app.handle()).expect("Failed to initialize database");

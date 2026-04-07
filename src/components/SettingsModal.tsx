@@ -1,4 +1,4 @@
-import { X, Palette, Check, Shield, Globe, Github } from "lucide-react";
+import { X, Palette, Check, Shield, Globe, Github, RefreshCw } from "lucide-react";
 
 export type ThemeId = "default" | "midnight-orange" | "ocean" | "forest" | "cyberpunk" | "light";
 
@@ -57,9 +57,10 @@ interface SettingsModalProps {
   onClose: () => void;
   currentTheme: ThemeId;
   onThemeChange: (theme: ThemeId) => void;
+  onCheckUpdate?: () => void;
 }
 
-export function SettingsModal({ isOpen, onClose, currentTheme, onThemeChange }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, currentTheme, onThemeChange, onCheckUpdate }: SettingsModalProps) {
   if (!isOpen) return null;
 
   return (
@@ -147,6 +148,27 @@ export function SettingsModal({ isOpen, onClose, currentTheme, onThemeChange }: 
               <div className="w-10 h-5 rounded-full bg-primary/20 relative cursor-not-allowed">
                 <div className="absolute right-1 top-1 w-3 h-3 rounded-full bg-primary"></div>
               </div>
+            </div>
+          </section>
+
+          {/* Update Section */}
+          <section className="space-y-4 pt-4 border-t border-border/30">
+            <div className="flex items-center space-x-2 text-primary">
+              <RefreshCw size={16} />
+              <h3 className="text-[11px] font-black uppercase tracking-widest">Updates & Support</h3>
+            </div>
+            <div className="p-4 rounded-xl border border-border bg-surface-hover/10 flex items-center justify-between">
+              <div className="space-y-1">
+                <span className="text-sm font-bold text-gray-100">Check for Updates</span>
+                <p className="text-[11px] text-muted font-medium">Get the latest features and bug fixes.</p>
+              </div>
+              <button 
+                onClick={onCheckUpdate}
+                className="px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-bold transition-all border border-primary/20 flex items-center space-x-2"
+              >
+                <RefreshCw size={14} />
+                <span>Check Now</span>
+              </button>
             </div>
           </section>
         </div>

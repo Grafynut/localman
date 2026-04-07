@@ -43,6 +43,8 @@ uuid = { version = "1.22.0", features = ["v4"] }
 chrono = "0.4.44"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 base64 = "0.22.1"
 tokio-tungstenite = { version = "0.26.1", features = ["rustls-tls-webpki-roots"] }
 http = "1"
